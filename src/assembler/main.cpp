@@ -32,7 +32,7 @@ Also supported "preprocessor":
 
 
 // Values from arduino tests:
-#define SIZEOF_INT 2
+#define SIZEOF_INT sizeof(int)
 
 
 #define METAKEY     0xEBA1
@@ -143,6 +143,8 @@ struct pre_keys {
  
 int pre_process(FILE *in, FILE *out) {
 	pre_keys *keys = NULL;
+	int ksize = 0;
+	int klen  = 0;
 		
 	while (1) {
 		int eof;
@@ -153,37 +155,108 @@ int pre_process(FILE *in, FILE *out) {
 		while (*buf == ' ' || *buf == '\t')
 			buf++;
 		
-		if (*buf == ';' || strlen(buf) == 0)
-			goto pre_loop_continue;
-		
-		// XXX: Not finished yet
+		if (*buf == ';' || strlen(buf) == 0) {
+			free(buf);		
+			if (eof)
+				break;
+			continue;
+		}
 		
 		// Do processing
-		/*
+		
 		char *tmp = buf;
 		
-		if (match('#')) {
-			++tmp;
-			
-			int off = 0;
-			
-			if (off = match("define")) {
-				tmp += off;
+		if (match(tmp, "#define") == sizeof("#define")) {
+			tmp += sizeof("#define");
 				
-				char *copy = (char*) malloc(strlen(tmp) + 1);
-				strcpy(copy, tmp);
-				
-				pre_keys = (char*) malloc(sizeof(pre_keys));
-				pre_keys->next = NULL;
-				pre_keyx->key = copy;
-				pre_keys
+			int key_start = -1;
+			int val_start = -1;
+			int val_end   = -1;
+			
+			while (1) {
+				if (*tmp == '\0')
+					break;
+				if (white(*tmp))
+					++tmp;
+				else 
+					break;
 			}
-		}*/
-
+			
+			if (*tmp == 0) {
+				printf("failed parse define");
+				goto pre_loop_continue;
+			}
+			
+			key_start = tmp - buf;
+			
+			while (1) {
+				if (*tmp == '\0')
+					break;
+				if (!white(*tmp))
+					++tmp;
+				else 
+					break;
+			}
+			
+			if (*tmp == 0) {
+				printf("failed parse define");
+				goto pre_loop_continue;
+			}
+			
+			val_start = tmp - buf;
+			
+			while (1) {
+				if (*tmp == '\0')
+					break;
+				++tmp;
+			}
+			
+			val_end = tmp - buf;
+			
+			char *key = (char*) malloc(val_start - key_start + 1);
+			char *val = (char*) malloc(val_end - val_start + 1);
+			
+			memcpy(key, buf + key_start, val_start - key_start);
+			key[val_start - key_start] = '\0';
+			
+			memcpy(val, buf + val_start, val_end - val_start);
+			val[val_end - val_start] = '\0';
+			
+			if (ksize == 0) keys = (pre_keys*) malloc(sizeof(pre_keys) * (ksize = 16));
+			else if (klen >= ksize) (pre_keys*) realloc(keys, sizeof(pre_keys) * (ksize <<= 16));
+			
+			keys[klen].key = key;
+			keys[klen++].value = val;
+			
+			//printf("%s => %s\n", keys[klen-1].key, keys[klen-1].value);
+			
+			goto pre_loop_continue;
+		} 
+/*
 		if (match(buf, "#"))
 			goto pre_loop_continue;
-
-		fprintf(out, "%s\n", buf);
+*/
+		//printf(">> %s %d %d\n", buf, strlen(buf), klen);
+		for (int i = 0; i < strlen(buf); ++i) {
+			bool matched = 0;
+			int k = 0;
+			for (; k < klen; ++k) {
+				//printf("match = %d, strlen = %d\n", match(buf+i, keys[k].key), strlen(keys[k].key));
+				if (match(buf+i, keys[k].key) == strlen(keys[k].key) + 1) {
+					matched = 1;
+					break;
+				}
+			}
+			
+			if (matched) {
+				//printf("%s => %s\n", keys[k].key, keys[k].value);
+				i += strlen(keys[k].key) - 1;
+				fprintf(out, "%s", keys[k].value);
+			} else
+				fputc(buf[i], out);
+		}
+		fputc('\n', out);
+		// fprintf(out, "%s\n", buf);
 		
 	pre_loop_continue:
 		
@@ -195,12 +268,11 @@ int pre_process(FILE *in, FILE *out) {
 	
 loop_end:
 	
-	pre_keys *temp;
-	while (keys) {
-		temp = keys->next;
-		free(keys);
-		keys = temp;
-	}
+	for (int i = 0; i < klen; ++i) {
+		free(keys[i].value);
+		free(keys[i].key);
+	}		
+	free(keys);
 	
 	return 1;
 };	
@@ -210,6 +282,8 @@ enum TOKEN_TYPE {
 	TINT,
 	TPLUS,
 	TMINUS,
+	TMUL,
+	TDIV,
 	TKEY,
 	TCOLON,
 	TEOF
@@ -350,6 +424,26 @@ token *tokenize(char *in) {
 			continue;
 		}
 		
+		// PLUS
+		if (in[cursor] == '+') {
+			++cursor;
+			if (!bsize) buf = (token*) malloc(sizeof(token) * (bsize = 16));
+			else if (blen >= bsize) buf = (token*) realloc(buf, sizeof(token) * (bsize <<= 2));
+			buf[blen++].type = TPLUS;
+			
+			continue;
+		}
+		
+		// MINUS
+		if (in[cursor] == '-') {
+			++cursor;
+			if (!bsize) buf = (token*) malloc(sizeof(token) * (bsize = 16));
+			else if (blen >= bsize) buf = (token*) realloc(buf, sizeof(token) * (bsize <<= 2));
+			buf[blen++].type = TMINUS;
+			
+			continue;
+		}
+		
 		// INT
 		if (digit(in[cursor])) {
 			int base = 10;
@@ -463,7 +557,7 @@ return_label:
 
 	if (bsize) {
 		if (blen >= bsize)
-			buf = (token*) realloc(buf, (blen <<= 1) * sizeof(token));
+			buf = (token*) realloc(buf, (bsize <<= 1) * sizeof(token));
 	
 		buf[blen].type = TEOF;
 	}
@@ -622,6 +716,220 @@ void print_token(token *tok, int i) {
 		printf("\"%s\"", tok[i].str);
 	if (tok[i].type == TCOLON)
 		printf(",");
+	if (tok[i].type == TPLUS)
+		printf("+");
+	if (tok[i].type == TMINUS)
+		printf("-");
+};
+
+int opint(token *tok, int off, int *result) {
+	tok += off;
+	// int cnt = 1;printf(">>>> %d\n", cnt++);
+	int i = 0;
+	if (tok[i].type == TINT) {                              // printf("1\n");
+		int val = tok[i].val;
+		++i;
+		
+		while (1) {                              // printf("2\n");
+			if (tok[i].type == TPLUS) {                      //         printf("3\n");
+				++i;
+				if (tok[i].type != TINT)
+					return 0;
+				                             //  printf("4\n");
+				val += tok[i].val;
+				++i;
+			} else if (tok[i].type == TMINUS) {                             //  printf("5\n");
+				++i;
+				if (tok[i].type != TINT)
+					return 0;
+				                              // printf("6\n");
+				val -= tok[i].val;
+				++i;
+			} else
+				break;                              // printf("7\n");
+		}                              // printf("8\n");
+		
+		*result = val;
+	} else
+		return 0;
+	                            //   printf("9\n");
+	return i;
+}
+
+// <op> int
+int op1int(FILE *out, token *tok, int off, int token) {
+	tok += off;
+	int i = 0;
+	int op1;
+	
+	int inc = opint(tok, i, &op1);
+	if (!inc)
+		return 0;
+	i += inc;
+	
+	write(out, token);
+	writeInt(out, op1);
+	
+	return i;
+};
+
+// <op> int, int
+int op2int(FILE *out, token *tok, int off, int token) {
+	tok += off;
+	int i = 0;
+	int op1;
+	int op2;
+	int inc = opint(tok, i, &op1);
+	
+	if (!inc)
+		return 0;
+	i += inc;
+	
+	if (tok[i].type != TCOLON)
+		return 0;
+	++i;
+	
+	inc = opint(tok, i, &op2);
+	if (!inc)
+		return 0;
+	i += inc;
+	
+	write(out, token);
+	writeInt(out, op1);
+	writeInt(out, op2);
+	
+	return i;
+};
+
+// <op> int, int, int
+int op3int(FILE *out, token *tok, int off, int token) {
+	tok += off;
+	
+	int i = 0;
+	int op1;
+	int op2;
+	int op3;
+	
+	int inc = opint(tok, i, &op1);
+	if (!inc)
+		return 0;
+	i += inc;
+	
+	if (tok[i].type != TCOLON)
+		return 0;
+	++i;
+	
+	inc = opint(tok, i, &op2);
+	if (!inc)
+		return 0;
+	i += inc;
+	
+	if (tok[i].type != TCOLON)
+		return 0;
+	++i;
+	
+	inc = opint(tok, i, &op3);
+	if (!inc)
+		return 0;
+	i += inc;
+	
+	write(out, token);
+	writeInt(out, op1);
+	writeInt(out, op2);
+	writeInt(out, op3);
+	
+	return i;
+};
+
+// <op> int, int, int, int
+int op4int(FILE *out, token *tok, int off, int token) {
+	tok += off;
+	
+	int i = 0;
+	int op1;
+	int op2;
+	int op3;
+	int op4;
+	
+	int inc = opint(tok, i, &op1);
+	if (!inc)
+		return 0;
+	i += inc;
+	
+	if (tok[i].type != TCOLON)
+		return 0;
+	++i;
+	
+	inc = opint(tok, i, &op2);
+	if (!inc)
+		return 0;
+	i += inc;
+	
+	if (tok[i].type != TCOLON)
+		return 0;
+	++i;
+	
+	inc = opint(tok, i, &op3);
+	if (!inc)
+		return 0;
+	i += inc;
+	
+	if (tok[i].type != TCOLON)
+		return 0;
+	++i;
+	
+	inc = opint(tok, i, &op4);
+	if (!inc)
+		return 0;
+	i += inc;
+	
+	write(out, token);
+	writeInt(out, op1);
+	writeInt(out, op2);
+	writeInt(out, op3);
+	writeInt(out, op4);
+	
+	return i;
+};
+
+// <op> int, int, byte
+int op2int1b(FILE *out, token *tok, int off, int token) {
+	tok += off;
+	
+	int i = 0;
+	int op1;
+	int op2;
+	int op3;
+	
+	int inc = opint(tok, i, &op1);
+	if (!inc)
+		return 0;
+	i += inc;
+	
+	if (tok[i].type != TCOLON)
+		return 0;
+	++i;
+	
+	inc = opint(tok, i, &op2);
+	if (!inc)
+		return 0;
+	i += inc;
+	
+	if (tok[i].type != TCOLON)
+		return 0;
+	++i;
+	
+	inc = opint(tok, i, &op3);
+	if (!inc)
+		return 0;
+	i += inc;
+	
+	write(out, token);
+	writeInt(out, op1);
+	writeInt(out, op2);
+	write(out, op3);
+	
+	return i;
 };
 
 int assemble(FILE *in, FILE *out) {
@@ -650,526 +958,350 @@ int assemble(FILE *in, FILE *out) {
 		// print_tokens(tok);
 		
 		if (strcmp(tok[0].str, "memcpy") == 0) {
-			if (matchseq(tok, 1, TINT, TCOLON, TINT, TCOLON, TINT)) {
-				write(out, MEMCPY);
-				writeInt(out, tok[1].val);
-				writeInt(out, tok[3].val);
-				writeInt(out, tok[5].val);
-				
-				goto loop_continue;
+			if (!op3int(out, tok, 1, MEMCPY)) {
+				++error;
+				printf("> %s\n", buf);
+				printf("memcpy int, int, int\n");
 			}
-			
-			++error;
-			printf("memcpy int, int, int\n");
 		} else if (strcmp(tok[0].str, "memref") == 0) {
-			if (matchseq(tok, 1, TINT, TCOLON, TINT, TCOLON, TINT)) {
-				write(out, MEMREF);
-				writeInt(out, tok[1].val);
-				writeInt(out, tok[3].val);
-				writeInt(out, tok[5].val);
-				
-				goto loop_continue;
+			if (!op3int(out, tok, 1, MEMREF)) {
+				++error;
+				printf("> %s\n", buf);
+				printf("memref int, int, int\n");
 			}
-			
-			++error;
-			printf("memref int, int, int\n");
 		} else if (strcmp(tok[0].str, "memderef") == 0) {
-			if (matchseq(tok, 1, TINT, TCOLON, TINT, TCOLON, TINT)) {
-				write(out, MEMDEREF);
-				writeInt(out, tok[1].val);
-				writeInt(out, tok[3].val);
-				writeInt(out, tok[5].val);
-				
-				goto loop_continue;
+			if (!op3int(out, tok, 1, MEMDEREF)) {
+				++error;
+				printf("> %s\n", buf);
+				printf("memderef int, int, int\n");
 			}
-			
-			++error;
-			printf("memderef int, int, int\n");
 		} else if (strcmp(tok[0].str, "memwrite") == 0) {
-			if (matchseq(tok, 1, TINT, TCOLON, TINT)) {
-				write(out, MEMWRITE);
-				writeInt(out, tok[1].val);
-				writeInt(out, tok[3].val);
+			int i = 1;
+			int op1;
+			int op2;
+			int inc;
+			int temp;
+			int expected_size;
+			int total_size = 0;
+			int write_len;
+			
+			if (!(inc = opint(tok, i, &op1)))
+				goto else_memwrite;
+			i += inc;
+			
+			if (tok[i].type != TCOLON)
+				goto else_memwrite;
+			++i;
+			
+			if (!(inc = opint(tok, i, &op2)))
+				goto else_memwrite;
+			i += inc;
+			
+			expected_size = op2;
+			
+			write(out, MEMWRITE);
+			writeInt(out, op1);
+			writeInt(out, op2);
+			
+			while (1) {
+				if (total_size >= expected_size)
+					break;
 				
-				int expected_size = tok[3].val;
-				// printf("expected_size = %d\n", expected_size);
+				if (tok[i].type != TCOLON) {
+					printf("write size < expected\n");
+					goto else_memwrite;
+				}
+				++i;
 				
-				if (expected_size) {
-					if (!matchseq(tok, 4, TCOLON))
-						goto else_memwrite;
-				} else
-					printf("Are you serious? memwrite nothing?\n");
-				
-				int i = 5;
-				int tot_len = 0;
-				while (1) {
-					if (tot_len == expected_size)
-						break;
+				if (tok[i].type == TSTRING) {
+					write_len = strlen(tok[i].str);
 					
-					if (tok[i].type == TSTRING) {
-						int write_len = strlen(tok[i].str);
-						
-						if (tot_len + write_len > expected_size) {
-							printf("warning: memwrite data_length > expected\n");
-							write(out, tok[i].str, expected_size - tot_len);
-							tot_len = expected_size;
-						} else {
-							tot_len += write_len;
-							write(out, tok[i].str, write_len);
-						}
-						
-						if (tot_len == expected_size)
-							break;
-					} else if (tok[i].type == TINT) {
-						// Assume integer is a byte value
-						++tot_len;
-						write(out, tok[i].val);
-						
-						++i;
-						if (tot_len == expected_size)
-							break;
+					if (total_size + write_len > expected_size) {
+						printf("> %s\n", buf);
+						printf("warning: memwrite data_length > expected\n");
+						write(out, tok[i].str, expected_size - total_size);
+						total_size = expected_size;
 					} else {
-						printf("unexpected token [");
-						print_token(tok, i);
-						printf("]\n");
-						++error;
-						goto loop_continue;
+						total_size += write_len;
+						write(out, tok[i].str, write_len);
 					}
 					
-					if (tok[i].type == TEOF)
+					++i;
+					if (total_size == expected_size)
 						break;
-					if (tok[i].type == TCOLON) 
-						continue;
 					
-					printf("unexpected token [");
-					print_token(tok, i);
-					printf("]\n");
-					++error;
-					goto loop_continue;
-				}
-				
-				goto loop_continue;
+					continue;
+				} else if (tok[i].type == TINT) {
+					if (!(inc = opint(tok, i, &temp)))
+						goto else_memwrite;
+					i += inc;
+					++total_size;
+					
+					write(out, temp);
+					continue;
+				} else 
+					goto else_memwrite;
 			}
+			
+			goto loop_continue;
 			
 		else_memwrite:
 			
 			++error;
+			printf("> %s\n", buf);
 			printf("memwrite int, int, [[byte]]\n");
 		} else if (strcmp(tok[0].str, "memset") == 0) {
-			if (matchseq(tok, 1, TINT, TCOLON, TINT, TCOLON, TINT)) {
-				write(out, MEMSET);
-				writeInt(out, tok[1].val);
-				writeInt(out, tok[3].val);
-				write(out, tok[5].val);
-				
-				goto loop_continue;
+			if (!op2int1b(out, tok, 1, MEMSET)) {
+				++error;
+				printf("> %s\n", buf);
+				printf("memset int, int, byte\n");
 			}
-			
-			++error;
-			printf("memset int, int, byte\n");
 		} else if (strcmp(tok[0].str, "alloc") == 0) {
-			if (matchseq(tok, 1, TINT, TCOLON, TINT)) {
-				write(out, ALLOC);
-				writeInt(out, tok[1].val);
-				writeInt(out, tok[3].val);
-				
-				goto loop_continue;
+			if (!op2int(out, tok, 1, ALLOC)) {
+				++error;
+				printf("> %s\n", buf);
+				printf("alloc int, int\n");
 			}
-			
-			++error;
-			printf("alloc int, int\n");
 		} else if (strcmp(tok[0].str, "free") == 0) {
-			if (matchseq(tok, 1, TINT)) {
-				write(out, FREE);
-				writeInt(out, tok[1].val);
-				
-				goto loop_continue;
+			if (!op1int(out, tok, 1, FREE)) {
+				++error;
+				printf("> %s\n", buf);
+				printf("free int\n");
 			}
-			
-			++error;
-			printf("free int\n");
 		} else if (strcmp(tok[0].str, "ncall") == 0) {
-			if (matchseq(tok, 1, TINT, TCOLON, TINT, TCOLON, TINT)) {
-				write(out, NATIVE_CALL);
-				writeInt(out, tok[1].val);
-				writeInt(out, tok[3].val);
-				writeInt(out, tok[5].val);
-				
-				int expected_size = tok[5].val;
-				// printf("expected_size = %d\n", expected_size);
-				
-				if (expected_size) 
-					if (!matchseq(tok, 6, TCOLON))
-						goto else_ncall;
-				
-				int i = 7;
-				int tot_len = 0;
-				while (1) {
-					if (tot_len == expected_size)
-						break;
-					
-					if (tok[i].type == TINT) {
-						++tot_len;
-						writeInt(out, tok[i].val);
-						
-						++i;
-						if (tot_len == expected_size)
-							break;
-					} else {
-						printf("unexpected token [");
-						print_token(tok, i);
-						printf("]\n");
-						++error;
-						goto loop_continue;
-					}
-					
-					if (tok[i].type == TEOF)
-						break;
-					if (tok[i].type == TCOLON) 
-						continue;
-					
-					printf("unexpected token [");
-					print_token(tok, i);
-					printf("]\n");
-					++error;
-					goto loop_continue;
-				}
-				
+			int i = 1;
+			int inc;
+			int temp;
+			int expected_args;
+			int total_args = 0;	
+			if (!(inc = op2int(out, tok, 1, NATIVE_CALL))) {
+				++error;
+				printf("> %s\n", buf);
+				printf("ncall int, int, int, [[int]]\n");
 				goto loop_continue;
-			} 
+			}					
+			i += inc;
+			
+			if (tok[i].type != TCOLON)
+				goto else_ncall;
+			++i;
+												
+			if (!(inc = opint(tok, i, &temp)))
+				goto else_ncall;
+			i += inc;
+													
+			writeInt(out, temp);
+			
+			expected_args = temp;
+			
+			for (; total_args < expected_args; ++total_args) {									
+				if (tok[i].type != TCOLON)
+					break;
+				++i;
+														
+				if (!(inc = opint(tok, i, &temp)))
+					goto else_ncall;
+				i += inc;
+														
+				writeInt(out, temp);
+			}
+												
+			if (total_args < expected_args) {
+				printf("> %s\n", buf);
+				printf("warning: argc < expected\n");
+			}
+													
+			goto loop_continue;
 			
 		else_ncall:
 			
 			++error;
+			printf("> %s\n", buf);
 			printf("ncall int, int, int, [[int]]\n");
 		} else if (strcmp(tok[0].str, "call") == 0) {
-			if (matchseq(tok, 1, TINT, TCOLON, TINT)) {
-				write(out, CALL);
-				writeInt(out, tok[1].val);
-				writeInt(out, tok[3].val);
-				
-				int expected_size = tok[3].val;
-				// printf("expected_size = %d\n", expected_size);
-				
-				if (expected_size) 
-					if (!matchseq(tok, 4, TCOLON))
-						goto else_call;
-				
-				int i = 5;
-				int tot_len = 0;
-				while (1) {
-					if (tot_len == expected_size)
-						break;
-					
-					if (tok[i].type == TINT) {
-						++tot_len;
-						writeInt(out, tok[i].val);
-						
-						++i;
-						if (tot_len == expected_size)
-							break;
-					} else {
-						printf("unexpected token [");
-						print_token(tok, i);
-						printf("]\n");
-						++error;
-						goto loop_continue;
-					}
-					
-					if (tok[i].type == TEOF)
-						break;
-					if (tok[i].type == TCOLON) 
-						continue;
-					
-					printf("unexpected token [");
-					print_token(tok, i);
-					printf("]\n");
-					++error;
-					goto loop_continue;
-				}
-				
+			int i = 1;
+			int inc;
+			int temp;
+			int expected_args;
+			int total_args = 0;	
+			if (!(inc = op1int(out, tok, 1, CALL))) {
+				++error;
+				printf("> %s\n", buf);
+				printf("call int, int, [[int]]\n");
 				goto loop_continue;
-			} 
+			}					
+			i += inc;
+			
+			if (tok[i].type != TCOLON)
+				goto else_call;
+			++i;
+												
+			if (!(inc = opint(tok, i, &temp)))
+				goto else_call;
+			i += inc;
+													
+			writeInt(out, temp);
+			
+			expected_args = temp;
+			
+			for (; total_args < expected_args; ++total_args) {									
+				if (tok[i].type != TCOLON)
+					break;
+				++i;
+														
+				if (!(inc = opint(tok, i, &temp)))
+					goto else_call;
+				i += inc;
+														
+				writeInt(out, temp);
+			}
+												
+			if (total_args < expected_args) {
+				printf("> %s\n", buf);
+				printf("warning: argc < expected\n");
+			}
+													
+			goto loop_continue;
 			
 		else_call:
 			
 			++error;
+			printf("> %s\n", buf);
 			printf("call int, int, [[int]]\n");
 		} else if (strcmp(tok[0].str, "ret") == 0) {
 			write(out, RET);
 		} else if (strcmp(tok[0].str, "jmpif") == 0) {
-			if (matchseq(tok, 1, TINT, TCOLON, TINT)) {
-				write(out, JMPIF);
-				writeInt(out, tok[1].val);
-				writeInt(out, tok[3].val);
-				
-				goto loop_continue;
+			if (!op2int(out, tok, 1, JMPIF)) {
+				++error;
+				printf("> %s\n", buf);
+				printf("jmpif int, int\n");
 			}
-			
-			++error;
-			printf("jmpif int, int\n");
 		} else if (strcmp(tok[0].str, "jmpifelse") == 0) {
-			if (matchseq(tok, 1, TINT, TCOLON, TINT, TCOLON, TINT)) {
-				write(out, JMPIFELSE);
-				writeInt(out, tok[1].val);
-				writeInt(out, tok[3].val);
-				writeInt(out, tok[5].val);
-				
-				goto loop_continue;
+			if (!op3int(out, tok, 1, JMPIFELSE)) {
+				++error;
+				printf("> %s\n", buf);
+				printf("jmpifelse int, int, int\n");
 			}
-			
-			++error;
-			printf("jmpifelse int, int, int\n");
 		} else if (strcmp(tok[0].str, "jmp") == 0) {
-			if (matchseq(tok, 1, TINT)) {
-				write(out, JMP);
-				writeInt(out, tok[1].val);
-				
-				goto loop_continue;
+			if (!op3int(out, tok, 1, MEMREF)) {
+				++error;
+				printf("> %s\n", buf);
+				printf("memref int, int, int\n");
 			}
-			
-			++error;
-			printf("jmp int\n");
 		} else if (strcmp(tok[0].str, "add") == 0) {
-			if (matchseq(tok, 1, TINT, TCOLON, TINT, TCOLON, TINT)) {
-				write(out, ADD);
-				writeInt(out, tok[1].val);
-				writeInt(out, tok[3].val);
-				writeInt(out, tok[5].val);
-				
-				goto loop_continue;
+			if (!op3int(out, tok, 1, ADD)) {
+				++error;
+				printf("> %s\n", buf);
+				printf("add int, int, int\n");
 			}
-			
-			++error;
-			printf("add int, int, int\n");
 		} else if (strcmp(tok[0].str, "sub") == 0) {
-			if (matchseq(tok, 1, TINT, TCOLON, TINT, TCOLON, TINT)) {
-				write(out, SUB);
-				writeInt(out, tok[1].val);
-				writeInt(out, tok[3].val);
-				writeInt(out, tok[5].val);
-				
-				goto loop_continue;
+			if (!op3int(out, tok, 1, SUB)) {
+				++error;
+				printf("> %s\n", buf);
+				printf("sub int, int, int\n");
 			}
-			
-			++error;
-			printf("sub int, int, int\n");
 		} else if (strcmp(tok[0].str, "mul") == 0) {
-			if (matchseq(tok, 1, TINT, TCOLON, TINT, TCOLON, TINT)) {
-				write(out, MUL);
-				writeInt(out, tok[1].val);
-				writeInt(out, tok[3].val);
-				writeInt(out, tok[5].val);
-				
-				goto loop_continue;
+			if (!op3int(out, tok, 1, MUL)) {
+				++error;
+				printf("> %s\n", buf);
+				printf("mul int, int, int\n");
 			}
-			
-			++error;
-			printf("mul int, int, int\n");
 		} else if (strcmp(tok[0].str, "div") == 0) {
-			if (matchseq(tok, 1, TINT, TCOLON, TINT, TCOLON, TINT, TCOLON, TINT)) {
-				write(out, DIV);
-				writeInt(out, tok[1].val);
-				writeInt(out, tok[3].val);
-				writeInt(out, tok[5].val);
-				writeInt(out, tok[7].val);
-				
-				goto loop_continue;
+			if (!op4int(out, tok, 1, DIV)) {
+				++error;
+				printf("> %s\n", buf);
+				printf("div int, int, int, int\n");
 			}
-			
-			++error;
-			printf("div int, int, int, int\n");
 		} else if (strcmp(tok[0].str, "band") == 0) {
-			if (matchseq(tok, 1, TINT, TCOLON, TINT, TCOLON, TINT, TCOLON, TINT)) {
-				write(out, BIT_AND);
-				writeInt(out, tok[1].val);
-				writeInt(out, tok[3].val);
-				writeInt(out, tok[5].val);
-				writeInt(out, tok[7].val);
-				
-				goto loop_continue;
+			if (!op4int(out, tok, 1, BIT_AND)) {
+				++error;
+				printf("> %s\n", buf);
+				printf("band int, int, int, int\n");
 			}
-			
-			++error;
-			printf("band int, int, int, int\n");
 		} else if (strcmp(tok[0].str, "bor") == 0) {
-			if (matchseq(tok, 1, TINT, TCOLON, TINT, TCOLON, TINT, TCOLON, TINT)) {
-				write(out, BIT_OR);
-				writeInt(out, tok[1].val);
-				writeInt(out, tok[3].val);
-				writeInt(out, tok[5].val);
-				writeInt(out, tok[7].val);
-				
-				goto loop_continue;
+			if (!op4int(out, tok, 1, BIT_OR)) {
+				++error;
+				printf("> %s\n", buf);
+				printf("bor int, int, int, int\n");
 			}
-			
-			++error;
-			printf("bor int, int, int, int\n");
 		} else if (strcmp(tok[0].str, "bxor") == 0) {
-			if (matchseq(tok, 1, TINT, TCOLON, TINT, TCOLON, TINT, TCOLON, TINT)) {
-				write(out, BIT_XOR);
-				writeInt(out, tok[1].val);
-				writeInt(out, tok[3].val);
-				writeInt(out, tok[5].val);
-				writeInt(out, tok[7].val);
-				
-				goto loop_continue;
+			if (!op4int(out, tok, 1, BIT_XOR)) {
+				++error;
+				printf("> %s\n", buf);
+				printf("bxor int, int, int, int\n");
 			}
-			
-			++error;
-			printf("bxor int, int, int, int\n");
 		} else if (strcmp(tok[0].str, "bnot") == 0) {
-			if (matchseq(tok, 1, TINT, TCOLON, TINT, TCOLON, TINT)) {
-				write(out, BIT_NOT);
-				writeInt(out, tok[1].val);
-				writeInt(out, tok[3].val);
-				writeInt(out, tok[5].val);
-				
-				goto loop_continue;
+			if (!op3int(out, tok, 1, BIT_NOT)) {
+				++error;
+				printf("> %s\n", buf);
+				printf("bnot int, int, int\n");
 			}
-			
-			++error;
-			printf("bnot int, int, int\n");
 		} else if (strcmp(tok[0].str, "and") == 0) {
-			if (matchseq(tok, 1, TINT, TCOLON, TINT, TCOLON, TINT, TCOLON, TINT)) {
-				write(out, AND);
-				writeInt(out, tok[1].val);
-				writeInt(out, tok[3].val);
-				writeInt(out, tok[5].val);
-				writeInt(out, tok[7].val);
-				
-				goto loop_continue;
+			if (!op4int(out, tok, 1, AND)) {
+				++error;
+				printf("> %s\n", buf);
+				printf("adn int, int, int, int\n");
 			}
-			
-			++error;
-			printf("and int, int, int, int\n");
 		} else if (strcmp(tok[0].str, "or") == 0) {
-			if (matchseq(tok, 1, TINT, TCOLON, TINT, TCOLON, TINT, TCOLON, TINT)) {
-				write(out, OR);
-				writeInt(out, tok[1].val);
-				writeInt(out, tok[3].val);
-				writeInt(out, tok[5].val);
-				writeInt(out, tok[7].val);
-				
-				goto loop_continue;
+			if (!op4int(out, tok, 1, OR)) {
+				++error;
+				printf("> %s\n", buf);
+				printf("or int, int, int, int\n");
 			}
-			
-			++error;
-			printf("or int, int, int, int\n");
 		} else if (strcmp(tok[0].str, "not") == 0) {
-			if (matchseq(tok, 1, TINT, TCOLON, TINT, TCOLON, TINT)) {
-				write(out, NOT);
-				writeInt(out, tok[1].val);
-				writeInt(out, tok[3].val);
-				writeInt(out, tok[5].val);
-				
-				goto loop_continue;
+			if (!op3int(out, tok, 1, NOT)) {
+				++error;
+				printf("> %s\n", buf);
+				printf("not int, int, int\n");
 			}
-			
-			++error;
-			printf("not int, int, int\n");
 		} else if (strcmp(tok[0].str, "eq") == 0) {
-			if (matchseq(tok, 1, TINT, TCOLON, TINT, TCOLON, TINT, TCOLON, TINT)) {
-				write(out, EQ);
-				writeInt(out, tok[1].val);
-				writeInt(out, tok[3].val);
-				writeInt(out, tok[5].val);
-				writeInt(out, tok[7].val);
-				
-				goto loop_continue;
+			if (!op4int(out, tok, 1, EQ)) {
+				++error;
+				printf("> %s\n", buf);
+				printf("eq int, int, int, int\n");
 			}
-			
-			++error;
-			printf("eq int, int, int, int\n");
 		} else if (strcmp(tok[0].str, "neq") == 0) {
-			if (matchseq(tok, 1, TINT, TCOLON, TINT, TCOLON, TINT, TCOLON, TINT)) {
-				write(out, NEQ);
-				writeInt(out, tok[1].val);
-				writeInt(out, tok[3].val);
-				writeInt(out, tok[5].val);
-				writeInt(out, tok[7].val);
-				
-				goto loop_continue;
+			if (!op4int(out, tok, 1, NEQ)) {
+				++error;
+				printf("> %s\n", buf);
+				printf("neq int, int, int, int\n");
 			}
-			
-			++error;
-			printf("neq int, int, int, int\n");
 		} else if (strcmp(tok[0].str, "gt") == 0) {
-			if (matchseq(tok, 1, TINT, TCOLON, TINT, TCOLON, TINT, TCOLON, TINT)) {
-				write(out, GT);
-				writeInt(out, tok[1].val);
-				writeInt(out, tok[3].val);
-				writeInt(out, tok[5].val);
-				writeInt(out, tok[7].val);
-				
-				goto loop_continue;
+			if (!op4int(out, tok, 1, GT)) {
+				++error;
+				printf("> %s\n", buf);
+				printf("gt int, int, int, int\n");
 			}
-			
-			++error;
-			printf("gt int, int, int, int\n");
 		} else if (strcmp(tok[0].str, "ge") == 0) {
-			if (matchseq(tok, 1, TINT, TCOLON, TINT, TCOLON, TINT, TCOLON, TINT)) {
-				write(out, GE);
-				writeInt(out, tok[1].val);
-				writeInt(out, tok[3].val);
-				writeInt(out, tok[5].val);
-				writeInt(out, tok[7].val);
-				
-				goto loop_continue;
+			if (!op4int(out, tok, 1, GE)) {
+				++error;
+				printf("> %s\n", buf);
+				printf("ge int, int, int, int\n");
 			}
-			
-			++error;
-			printf("ge int, int, int, int\n");
 		} else if (strcmp(tok[0].str, "lt") == 0) {
-			if (matchseq(tok, 1, TINT, TCOLON, TINT, TCOLON, TINT, TCOLON, TINT)) {
-				write(out, LT);
-				writeInt(out, tok[1].val);
-				writeInt(out, tok[3].val);
-				writeInt(out, tok[5].val);
-				writeInt(out, tok[7].val);
-				
-				goto loop_continue;
+			if (!op4int(out, tok, 1, LT)) {
+				++error;
+				printf("> %s\n", buf);
+				printf("lt int, int, int, int\n");
 			}
-			
-			++error;
-			printf("lt int, int, int, int\n");
 		} else if (strcmp(tok[0].str, "le") == 0) {
-			if (matchseq(tok, 1, TINT, TCOLON, TINT, TCOLON, TINT, TCOLON, TINT)) {
-				write(out, LE);
-				writeInt(out, tok[1].val);
-				writeInt(out, tok[3].val);
-				writeInt(out, tok[5].val);
-				writeInt(out, tok[7].val);
-				
-				goto loop_continue;
+			if (!op4int(out, tok, 1, LE)) {
+				++error;
+				printf("> %s\n", buf);
+				printf("le int, int, int, int\n");
 			}
-			
-			++error;
-			printf("le int, int, int, int\n");
 		} else if (strcmp(tok[0].str, "push") == 0) {
-			if (matchseq(tok, 1, TINT, TCOLON, TINT, TCOLON, TINT)) {
-				write(out, PUSH);
-				writeInt(out, tok[1].val);
-				writeInt(out, tok[3].val);
-				writeInt(out, tok[5].val);
-				
-				goto loop_continue;
+			if (!op3int(out, tok, 1, PUSH)) {
+				++error;
+				printf("> %s\n", buf);
+				printf("push int, int, int, int\n");
 			}
-			
-			++error;
-			printf("push int, int, int\n");
 		} else if (strcmp(tok[0].str, "pop") == 0) {
-			if (matchseq(tok, 1, TINT, TCOLON, TINT, TCOLON, TINT)) {
-				write(out, POP);
-				writeInt(out, tok[1].val);
-				writeInt(out, tok[3].val);
-				writeInt(out, tok[5].val);
-				
-				goto loop_continue;
+			if (!op3int(out, tok, 1, POP)) {
+				++error;
+				printf("> %s\n", buf);
+				printf("pop int, int, int, int\n");
 			}
-			
-			++error;
-			printf("pop int, int, int\n");
 		}
 		
 	loop_continue:
@@ -1184,13 +1316,13 @@ int assemble(FILE *in, FILE *out) {
 loop_end:
 
 	if (error)
-		printf("total errors: %d", error);
+		printf("Total errors: %d\n", error);
 
 	return 1;
 };
 
 
-// g++ main.cpp --std=c++11 -w -g -o main && valgrind --leak-check=full ./main test.asl
+// g++ main.cpp --std=c++11 -w -g -o main && valgrind --leak-check=full ./main -i 2 test.asl
 
 int main(int argc, char **argv) {
 	const char *input      = "in.asl";
