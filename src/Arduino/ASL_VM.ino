@@ -57,7 +57,7 @@ Supported operations on the VM:
 
 * and [result_ptr], [op1_ptr], [op2_ptr], [size]
 * or [result_ptr], [op1_ptr], [op2_ptr], [size]
-* not [result_ptr], [op1_ptr], [op2_ptr], [size]
+* not [result_ptr], [op_ptr], [size]
 
 * eq[result_ptr], [op1_ptr], [op2_ptr], [size]
 * neq[result_ptr], [op1_ptr], [op2_ptr], [size]
@@ -131,19 +131,17 @@ static FILE *serial_stream = fdevopen(serial_fputchar, NULL);
 #define SD_PIN        4
 #define STACK_SIZE 512
 
-#define BOOTLOADER      { CALL, &bootloader_func, 0 }
-#define BOOTLOADER_SIZE 3
-
 #define BOOTFILE        "BOOT"
 
 
 enum SOURCE_TYPE {
 	SOURCE_STREAM,       // Stream from a file
-	SOURCE_ARRAY         // Direct from passed array
+	SOURCE_ARRAY,        // Direct from passed array
+	SOURCE_NONE
 };
 
 struct SOURCE {
-	SOURCE_TYPE type;
+	SOURCE_TYPE type = SOURCE_NONE;
 	File        file;
 	char      *array = 0;
 	int         size = 0;
@@ -203,24 +201,30 @@ void (*reset_func) (void) = 0;
 #define UNEXPECTED_COMMAND   18
 #define ADDRESS_OUT_OF_RANGE 19
 #define BOOTLOADER_FAIL      20
+#define SD_FAILED            21
+#define NO_SOURCE            22
 
 void exception(char code) {
 	if (code == SOURCE_BROKEN)
-		Serial.println(F("SOURCE_BROKEN exception"));
+		Serial.println(F("SOURCE_BROKEN"));
 	if (code == STACK_OVERFLOW)
-		Serial.println(F("STACK_OVERFLOW exception"));
+		Serial.println(F("STACK_OVERFLOW"));
 	if (code == STACK_UNDERFLOW)
-		Serial.println(F("STACK_UNDERFLOW exception"));
+		Serial.println(F("STACK_UNDERFLOW"));
 	if (code == END_OF_PROGRAM)
-		Serial.println(F("END_OF_PROGRAM exception"));
+		Serial.println(F("END_OF_PROGRAM"));
 	if (code == DIVIDE_BY_ZERO)
-		Serial.println(F("DIVIDE_BY_ZERO exception"));
+		Serial.println(F("DIVIDE_BY_ZERO"));
 	if (code == UNEXPECTED_COMMAND)
-		Serial.println(F("UNEXPECTED_COMMAND exception"));
+		Serial.println(F("UNEXPECTED_COMMAND"));
 	if (code == ADDRESS_OUT_OF_RANGE)
-		Serial.println(F("ADDRESS_OUT_OF_RANGE exception"));
+		Serial.println(F("ADDRESS_OUT_OF_RANGE"));
 	if (code == BOOTLOADER_FAIL)
-		Serial.println(F("BOOTLOADER_FAIL exception"));
+		Serial.println(F("BOOTLOADER_FAIL"));
+	if (code == SD_FAILED)
+		Serial.println(F("SD_FAILED"));
+	if (code == NO_SOURCE)
+		Serial.println(F("NO_SOURCE"));
 	
 	if (source.type == SOURCE_ARRAY) {
 		printf("Array layout [%d]:", source.size);
@@ -244,6 +248,58 @@ void exception(char code) {
 	
 	delay(1000);
 	reset_func();
+};
+
+char next() {
+	if (source.type == SOURCE_ARRAY)
+		if (source.cursor < source.size) {
+			source.address++;
+			return source.array[source.cursor++];
+		} else
+			return EOF;
+	else {
+		source.address++;
+		return source.file.read();
+	}
+};
+
+bool read(char *buf, int size) {
+	if (size == 0)
+		return 1;
+	
+	if (source.type == SOURCE_ARRAY)
+		if (source.cursor + size > source.size)
+			return 0;
+		else {
+			for (int i = 0; i < size; ++i)
+				buf[i] = source.array[source.cursor + i];
+			
+			source.cursor += size;
+			
+			source.address+= size;
+			return 1;
+		}
+	else {
+		if (source.file.read(buf, size) != size)
+			return 0;
+			
+		source.address+= size;
+		
+		return 1;
+	}
+};
+
+void jump(int address) {
+	if (source.type == SOURCE_ARRAY) {
+		if (source.size <= address)
+			exception(ADDRESS_OUT_OF_RANGE);
+		source.cursor  = address;
+		source.address = address;
+	} else {
+		if (!source.file.seek(address))
+			exception(ADDRESS_OUT_OF_RANGE);
+		source.address = address;
+	}
 };
 
 bool file_to_array(char *filename) {
@@ -313,64 +369,13 @@ int bootloader_func(int argc, int *argv) {
 	return 0;
 };
 
-char next() {
-	if (source.type == SOURCE_ARRAY)
-		if (source.cursor < source.size) {
-			source.address++;
-			return source.array[source.cursor++];
-		} else
-			return EOF;
-	else {
-		source.address++;
-		return source.file.read();
-	}
-};
-
-bool read(char *buf, int size) {
-	if (size == 0)
-		return 1;
-	
-	if (source.type == SOURCE_ARRAY)
-		if (source.cursor + size > source.size)
-			return 0;
-		else {
-			for (int i = 0; i < size; ++i)
-				buf[i] = source.array[source.cursor + i];
-			
-			source.cursor += size;
-			
-			source.address+= size;
-			return 1;
-		}
-	else {
-		if (source.file.read(buf, size) != size)
-			return 0;
-			
-		source.address+= size;
-		
-		return 1;
-	}
-};
-
-void jump(int address) {
-	if (source.type == SOURCE_ARRAY) {
-		if (source.size <= address)
-			exception(ADDRESS_OUT_OF_RANGE);
-		source.cursor  = address;
-		source.address = address;
-	} else {
-		if (!source.file.seek(address))
-			exception(ADDRESS_OUT_OF_RANGE);
-		source.address = address;
-	}
-};
-
 void setup() {
 	// printf function
 	stdout = serial_stream; 
 	
 	Serial.begin(BAUD_RATE);
 	
+/*
 	source.type  = SOURCE_ARRAY;
 	
 	// build bootloader
@@ -394,10 +399,26 @@ void setup() {
 	source.alloc = 1;
 	source.cursor = 0;
 	source.address = 0;
+*/
+	
+	// Boot directly from SD
+	if (!SD.begin(SD_PIN)) {
+		Serial.print(F("bootloader: ")); Serial.println(F("SD init failed"));
+		exception(SD_FAILED);
+	}
+	
+	Serial.print(F("bootloader: ")); Serial.println(F("SD init done"));
+	Serial.print(F("bootloader: ")); Serial.print  (F("bootloader: stack_addr = 0x"));
+	Serial.println((int) stack.stack, 16);
+	
+	load_file(BOOTFILE);
 };
 
 void loop() {
 	// owo
+	
+	if (source.type == SOURCE_NONE)
+		exception(NO_SOURCE);
 	
 	while (1) {
 		char c = next();
