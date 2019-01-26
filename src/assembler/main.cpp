@@ -156,6 +156,8 @@ int pre_process(FILE *in, FILE *out) {
 		if (*buf == ';' || strlen(buf) == 0)
 			goto pre_loop_continue;
 		
+		// XXX: Not finished yet
+		
 		// Do processing
 		/*
 		char *tmp = buf;
