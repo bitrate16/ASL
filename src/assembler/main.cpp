@@ -222,6 +222,16 @@ int pre_process(FILE *in, FILE *out) {
 			memcpy(val, buf + val_start, val_end - val_start);
 			val[val_end - val_start] = '\0';
 			
+			for (int i = 0; i < klen; ++i) {
+				if (strcmp(keys[i].key, key) == 0) {
+					free(key);
+					free(keys[i].value);
+					keys[i].value = val;
+					
+					goto pre_loop_continue;
+				}
+			}
+			
 			if (ksize == 0) keys = (pre_keys*) malloc(sizeof(pre_keys) * (ksize = 16));
 			else if (klen >= ksize) (pre_keys*) realloc(keys, sizeof(pre_keys) * (ksize <<= 16));
 			
