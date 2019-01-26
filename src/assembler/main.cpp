@@ -71,6 +71,7 @@ Also supported "preprocessor":
 #define LT              37
 #define LE              38
 #define RET             39
+#define NONE            40
 
 // Argument constants
 int VMH_INT_SIZE = SIZEOF_INT;
@@ -474,6 +475,7 @@ token *tokenize(char *in) {
 				int conv = c2int(in[cursor], base);
 				
 				if (conv == -1) {
+					printf("> %s\n", in);
 					printf("base mismatch integer literal\n");
 					goto error_label;
 				}
@@ -1180,6 +1182,8 @@ int assemble(FILE *in, FILE *out) {
 			printf("call int, int, [[int]]\n");
 		} else if (strcmp(tok[0].str, "ret") == 0) {
 			write(out, RET);
+		}else if (strcmp(tok[0].str, "none") == 0) {
+			write(out, NONE);
 		} else if (strcmp(tok[0].str, "jmpif") == 0) {
 			if (!op2int(out, tok, 1, JMPIF)) {
 				++error;
