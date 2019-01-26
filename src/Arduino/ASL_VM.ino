@@ -82,12 +82,6 @@ Additional:
 #include <SD.h>
 #include <avr/pgmspace.h>
 
-// printf function
-
-#include <stdio.h>
-static int serial_fputchar(const char ch, FILE *stream) { Serial.write(ch); return ch; }
-static FILE *serial_stream = fdevopen(serial_fputchar, NULL);
-
 // Block of pre-defined constants
 
 #define METAKEY     0xEBA1
@@ -126,13 +120,13 @@ static FILE *serial_stream = fdevopen(serial_fputchar, NULL);
 #define LT              37
 #define LE              38
 #define RET             39
+#define NONE            40
 
-#define BAUD_RATE  9600
-#define SD_PIN        4
-#define STACK_SIZE 512
+#define BAUD_RATE     9600
+#define SD_PIN           4
+#define STACK_SIZE     512
 
-#define BOOTFILE        "BOOT"
-
+#define BOOTFILE        "ASL"
 
 enum SOURCE_TYPE {
 	SOURCE_STREAM,       // Stream from a file
@@ -204,7 +198,38 @@ void (*reset_func) (void) = 0;
 #define SD_FAILED            21
 #define NO_SOURCE            22
 
+#define PRINT_DUMP_ON_EXCEPTION
+#define PRINT_EXCEPTION
+
+void printint(int n, int size, int base, char fill) {
+	if (n < 0) {
+		--size;
+		Serial.print('-');
+		n = -n;
+	}
+	
+	char buf[size];
+	int i = 0;
+	while (n) {
+		buf[i] = n % base;
+		if (base > 10 && buf[i] > 9)
+			buf[i] += 'A' - 10;
+		else
+			buf[i] += '0';
+			
+		n /= base;
+		++i;
+	}
+	for (; i < size; ++i)
+		buf[i] = fill;
+	
+	for (i = 0; i < size; ++i)
+		Serial.print((char) buf[size - i - 1]);
+};
+
 void exception(char code) {
+#ifdef PRINT_EXCEPTION
+
 	if (code == SOURCE_BROKEN)
 		Serial.println(F("SOURCE_BROKEN"));
 	if (code == STACK_OVERFLOW)
@@ -225,42 +250,66 @@ void exception(char code) {
 		Serial.println(F("SD_FAILED"));
 	if (code == NO_SOURCE)
 		Serial.println(F("NO_SOURCE"));
-	
+
+#endif
+
+#ifdef PRINT_DUMP_ON_EXCEPTION
+
 	if (source.type == SOURCE_ARRAY) {
-		printf("Array layout [%d]:", source.size);
-		Serial.println();
+		Serial.print(F("Array layout: ["));
+		Serial.print(source.size);
+		Serial.println(']');
 		
-		Serial.print("----");
-		for (int i = 0; i < 10; ++i) 
-			printf(" | %04d", i);
+		Serial.print(F("----"));
+		for (int i = 0; i < 16; ++i) {
+			Serial.print(F(" | "));
+			printint(i, 2, 16, '0');
+		}
 		
 		for (int i = 0; i < source.size; ++i) {
-			if (i % 10 == 0) {
+			if (i % 16 == 0) {
 				Serial.println();
-				printf("%04d", i / 10);
+				printint(i / 16, 4, 16, '0');
 			}
 			
-			printf(" | %04d", source.array[i]);
+			Serial.print(F(" | "));
+			printint(source.array[i] & 0xFF, 2, 16, '0');;
 		}		
 		
 		Serial.println();
 	}
+	if (source.type == SOURCE_STREAM) {
+		Serial.print(F("File layout: ["));
+		source.file.seek(0);
+		int file_size = source.file.size();
+		Serial.print(file_size);
+		Serial.println(']');
+		
+		Serial.print(F("----"));
+		for (int i = 0; i < 16; ++i) {
+			Serial.print(F(" | "));
+			printint(i, 2, 16, '0');
+		}
+		
+		for (int i = 0; i < file_size; ++i) {
+			if (i % 16 == 0) {
+				Serial.println();
+				printint(i / 16, 4, 16, '0');
+			}
+			
+			Serial.print(F(" | "));
+			char c;
+			source.file.read(&c, 1);
+			printint(c & 0xFF, 2, 16, '0');;
+		}		
+		
+		Serial.println();
+	}
+
+#endif
 	
 	delay(1000);
 	reset_func();
-};
-
-char next() {
-	if (source.type == SOURCE_ARRAY)
-		if (source.cursor < source.size) {
-			source.address++;
-			return source.array[source.cursor++];
-		} else
-			return EOF;
-	else {
-		source.address++;
-		return source.file.read();
-	}
 };
 
 bool read(char *buf, int size) {
@@ -333,22 +382,50 @@ bool file_to_array(char *filename) {
 };
 
 bool load_file(char *filename) {
-	File file = SD.open(filename);
-	
-	if (!file)
-		return 0;
-	
 	if (source.type == SOURCE_ARRAY && source.alloc) 
 		free(source.array);
 	else if (source.type == SOURCE_STREAM)
 		source.file.close();
-		
+	
+	source.file = SD.open(filename);
+	
+	if (!source.file)
+		return 0;
 	
 	source.type = SOURCE_STREAM;
 	source.address = 0;
-	source.file = file;
 	
 	return 1;
+};
+
+#define BRIDGE_PRINT_ADDR  0
+#define BRIDGE_PRINT       1
+#define BRIDGE_READ_CH     2
+#define BRIDGE_DELAY       3
+
+int bridge_func(int argc, int *argv) {
+	if (argc == 0)
+		return 0;
+	
+	if (argv[0] == BRIDGE_PRINT_ADDR) {	// Prints out all addreses used in VM	
+										// Also, put here output of all functions & constants that're used in there
+		Serial.print(F("bootloader: ")); Serial.print(F("sizeof(int) = 0x")); Serial.println(sizeof(int), 16);
+		Serial.print(F("bootloader: ")); Serial.print(F("stack_addr  = 0x")); Serial.println((int) stack.stack, 16);
+		Serial.print(F("bootloader: ")); Serial.print(F("bridge_func = 0x")); Serial.println((int) bridge_func, 16);
+		return 1;
+	} 
+	if (argv[0] == BRIDGE_PRINT) { // Print argv[2] as regular c string
+		if (argc < 2)
+			return 0;
+		
+		char *str = (char*) argv[1];
+		Serial.print(str);
+	}
+	if (argv[0] == BRIDGE_DELAY)
+		if (argc < 2)
+			return 0;
+		else
+			delay(argv[1]);
 };
 
 // Called on arduino booted up
@@ -369,10 +446,7 @@ int bootloader_func(int argc, int *argv) {
 	return 0;
 };
 
-void setup() {
-	// printf function
-	stdout = serial_stream; 
-	
+void setup() {	
 	Serial.begin(BAUD_RATE);
 	
 /*
@@ -408,8 +482,9 @@ void setup() {
 	}
 	
 	Serial.print(F("bootloader: ")); Serial.println(F("SD init done"));
-	Serial.print(F("bootloader: ")); Serial.print  (F("bootloader: stack_addr = 0x"));
-	Serial.println((int) stack.stack, 16);
+	Serial.print(F("bootloader: ")); Serial.print(F("sizeof(int) = 0x")); Serial.println(sizeof(int), 16);
+	Serial.print(F("bootloader: ")); Serial.print(F("stack_addr  = 0x")); Serial.println((int) stack.stack, 16);
+	Serial.print(F("bootloader: ")); Serial.print(F("bridge_func = 0x")); Serial.println((int) bridge_func, 16);
 	
 	load_file(BOOTFILE);
 };
@@ -421,7 +496,9 @@ void loop() {
 		exception(NO_SOURCE);
 	
 	while (1) {
-		char c = next();
+		char c;
+		if (!read(&c, 1))
+			exception(END_OF_PROGRAM);
 		
 		if (c == EOF) { // What's next..?
 			exception(END_OF_PROGRAM);
@@ -894,6 +971,8 @@ void loop() {
 			stack.pop(value, size);
 			if (result)
 				*(int*) result = stack.stack + stack.size;
+		} else if (c == NONE) {
+			// Nothing
 		} else
 			exception(UNEXPECTED_COMMAND);
 	}
