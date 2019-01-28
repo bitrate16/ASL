@@ -201,6 +201,16 @@ void (*reset_func) (void) = 0;
 #define PRINT_DUMP_ON_EXCEPTION
 #define PRINT_EXCEPTION
 
+// If assembler resulta layout like that:
+// 0xABCDEF => 
+// | 00 | 01 | 02 |
+//   AB   CD   EF => incorrect matching int{ [0]=0xAB, [1]=0xCD, [2]=0xEF }
+// Use this key
+// #define VM_LITTLE_ENDIAN
+// Else:
+// | 00 | 01 | 02 |
+//   EF   CD   AB
+
 void printint(int n, int size, int base, char fill) {
 	if (n < 0) {
 		--size;
@@ -328,7 +338,15 @@ bool read(char *buf, int size) {
 		else {
 			for (int i = 0; i < size; ++i)
 				buf[i] = source.array[source.cursor + i];
-			
+
+#ifdef VM_BIG_ENDIAN
+			for (int i = 0; i < size / 2; ++i) {
+				char temp = buf[i];
+				buf[i] = buf[size - i - 1];
+				buf[size - i - 1] = temp;
+			}
+#endif
+
 			source.cursor += size;
 			
 			source.address += size;
@@ -337,6 +355,14 @@ bool read(char *buf, int size) {
 	else {
 		if (source.file.read(buf, size) != -1)
 			return 0;
+
+#ifdef VM_BIG_ENDIAN
+			for (int i = 0; i < size / 2; ++i) {
+				char temp = buf[i];
+				buf[i] = buf[size - i - 1];
+				buf[size - i - 1] = temp;
+			}
+#endif
 			
 		source.address += size;
 		
@@ -566,6 +592,11 @@ void loop() {
 				
 			int ptrarray[argc];
 			read((char*) ptrarray, argc * sizeof(int));
+			
+			int argv[argc];
+			for (int i = 0; i < argc; ++i) {
+				read((char*) (argv + i), sizeof(int));
+			}
 			
 			int (*func) (int, int*) = ptr;
 			
