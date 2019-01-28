@@ -36,7 +36,7 @@ Also supported "preprocessor":
 #define SIZEOF_INT sizeof(int)
 
 // Use little endian for integers
-#define USE_LITTLE_ENDIAN
+// #define USE_LITTLE_ENDIAN
 
 #define METAKEY     0xEBA1
 // #define EOF             -1
@@ -75,6 +75,7 @@ Also supported "preprocessor":
 #define LE              38
 #define RET             39
 #define NONE            40
+#define HALT            41
 
 // Argument constants
 int VMH_INT_SIZE = SIZEOF_INT;
@@ -535,7 +536,7 @@ token *tokenize(char *in) {
 					str = (char*) realloc(str, (ssize <<= 2));
 				
 				if (in[cursor] == '\\') {
-					if (in[cursor] == 'x') {
+					if (in[cursor+1] == 'x') {
 						cursor += 2;
 						if (cursor + 2 >= size) 
 							printf("hex-code char notation expected");
@@ -545,8 +546,26 @@ token *tokenize(char *in) {
 							// ignore everything
 							str[slen++] = ((a & 0xF) << 1) | (b & 0xF);
 						}
-					} else if (in[cursor] == '"') {
+					} else if (in[cursor+1] == '"') {
 						str[slen++] = '"';
+						cursor += 2;
+					} else if (in[cursor+1] == 'n') {
+						str[slen++] = '\n';
+						cursor += 2;
+					} else if (in[cursor+1] == 'r') {
+						str[slen++] = '\r';
+						cursor += 2;
+					} else if (in[cursor+1] == 'f') {
+						str[slen++] = '\f';
+						cursor += 2;
+					} else if (in[cursor+1] == 't') {
+						str[slen++] = '\t';
+						cursor += 2;
+					} else if (in[cursor+1] == 'b') {
+						str[slen++] = '\b';
+						cursor += 2;
+					} else if (in[cursor+1] == '0') {
+						str[slen++] = '\0';
 						cursor += 2;
 					} else
 						str[slen++] = in[cursor++];
@@ -1232,8 +1251,10 @@ int assemble(FILE *in, FILE *out) {
 			printf("call int, int, [[int]]\n");
 		} else if (strcmp(tok[0].str, "ret") == 0) {
 			write(out, RET);
-		}else if (strcmp(tok[0].str, "none") == 0) {
+		} else if (strcmp(tok[0].str, "none") == 0) {
 			write(out, NONE);
+		} else if (strcmp(tok[0].str, "halt") == 0) {
+			write(out, HALT);
 		} else if (strcmp(tok[0].str, "jmpif") == 0) {
 			if (!op2int(out, tok, 1, JMPIF)) {
 				++error;
