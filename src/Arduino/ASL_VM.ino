@@ -400,8 +400,10 @@ bool load_file(char *filename) {
 
 #define BRIDGE_PRINT_ADDR  0
 #define BRIDGE_PRINT       1
-#define BRIDGE_READ_CH     2
-#define BRIDGE_DELAY       3
+#define BRIDGE_PRINT_BUF   2
+#define BRIDGE_READ        3
+#define BRIDGE_READ_CH     4
+#define BRIDGE_DELAY       5
 
 int bridge_func(int argc, int *argv) {
 	if (argc == 0)
@@ -409,23 +411,43 @@ int bridge_func(int argc, int *argv) {
 	
 	if (argv[0] == BRIDGE_PRINT_ADDR) {	// Prints out all addreses used in VM	
 										// Also, put here output of all functions & constants that're used in there
-		Serial.print(F("bootloader: ")); Serial.print(F("sizeof(int) = 0x")); Serial.println(sizeof(int), 16);
-		Serial.print(F("bootloader: ")); Serial.print(F("stack_addr  = 0x")); Serial.println((int) stack.stack, 16);
-		Serial.print(F("bootloader: ")); Serial.print(F("bridge_func = 0x")); Serial.println((int) bridge_func, 16);
+		Serial.print(F("#: ")); Serial.print(F("sizeof(int) = 0x")); Serial.println(sizeof(int), 16);
+		Serial.print(F("#: ")); Serial.print(F("stack_addr  = 0x")); Serial.println((int) stack.stack, 16);
+		Serial.print(F("#: ")); Serial.print(F("bridge_func = 0x")); Serial.println((int) bridge_func, 16);
 		return 1;
 	} 
-	if (argv[0] == BRIDGE_PRINT) { // Print argv[2] as regular c string
+	if (argv[0] == BRIDGE_PRINT) { // Print argv[1] as regular c string
 		if (argc < 2)
 			return 0;
 		
-		char *str = (char*) argv[1];
-		Serial.print(str);
+		Serial.print((char*) argv[1]);
+	}
+	if (argv[0] == BRIDGE_PRINT_BUF) { // Print argv[1] as character buffer sizeof argv[1]
+		if (argc < 3)
+			return 0;
+		
+		for (int i = 0; i < argv[1]; ++i)
+			Serial.print(((char*) argv[2])[i]);
+	}
+	if (argv[0] == BRIDGE_READ) { // Read argv[1] chars into argv[2]
+		if (argc < 3)
+			return 0;
+		
+		for (int i = 0; i < argv[1]; ++i)
+			((char*) argv[1])[i] = Serial.read();
+	}
+	if (argv[0] == BRIDGE_READ_CH) { // Read single character and write it to argv[1] addr
+		if (argc < 2)
+			return 0;
+		
+		*(char*) argv[1] = Serial.read();
 	}
 	if (argv[0] == BRIDGE_DELAY)
 		if (argc < 2)
 			return 0;
 		else
 			delay(argv[1]);
+	return 1;
 };
 
 void setup() {	
@@ -459,14 +481,14 @@ void setup() {
 	
 	// Boot directly from SD
 	if (!SD.begin(SD_PIN)) {
-		Serial.print(F("bootloader: ")); Serial.println(F("SD init failed"));
+		Serial.print(F("#: ")); Serial.println(F("SD init failed"));
 		exception(SD_FAILED);
 	}
 	
-	Serial.print(F("bootloader: ")); Serial.println(F("SD init done"));
-	Serial.print(F("bootloader: ")); Serial.print(F("sizeof(int) = 0x")); Serial.println(sizeof(int), 16);
-	Serial.print(F("bootloader: ")); Serial.print(F("stack_addr  = 0x")); Serial.println((int) stack.stack, 16);
-	Serial.print(F("bootloader: ")); Serial.print(F("bridge_func = 0x")); Serial.println((int) bridge_func, 16);
+	Serial.print(F("#: ")); Serial.println(F("SD init done"));
+	Serial.print(F("#: ")); Serial.print(F("sizeof(int) = 0x")); Serial.println(sizeof(int), 16);
+	Serial.print(F("#: ")); Serial.print(F("stack_addr  = 0x")); Serial.println((int) stack.stack, 16);
+	Serial.print(F("#: ")); Serial.print(F("bridge_func = 0x")); Serial.println((int) bridge_func, 16);
 	
 	load_file(BOOTFILE);
 };
