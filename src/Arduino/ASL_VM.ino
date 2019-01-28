@@ -328,14 +328,14 @@ bool read(char *buf, int size) {
 			
 			source.cursor += size;
 			
-			source.address+= size;
+			source.address += size;
 			return 1;
 		}
 	else {
-		if (source.file.read(buf, size) != size)
+		if (source.file.read(buf, size) != -1)
 			return 0;
 			
-		source.address+= size;
+		source.address += size;
 		
 		return 1;
 	}
