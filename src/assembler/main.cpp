@@ -36,7 +36,7 @@ Also supported "preprocessor":
 #define SIZEOF_INT sizeof(int)
 
 // Use little endian for integers
-#define USE_BIG_ENDIAN
+#define USE_LITTLE_ENDIAN
 
 #define METAKEY     0xEBA1
 // #define EOF             -1
@@ -695,7 +695,7 @@ int write(FILE *dest, char *ptr, int size) {
 };
 
 int writeInt(FILE *dest, int i) {
-#ifdef USE_BIG_ENDIAN
+#ifdef USE_LITTLE_ENDIAN
 	switch (VMH_INT_SIZE) {
 		case 1:
 			write(dest, i & 0xFF);
