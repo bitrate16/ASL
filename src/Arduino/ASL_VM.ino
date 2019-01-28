@@ -230,8 +230,11 @@ void printint(int n, int size, int base, char fill) {
 void exception(char code) {
 #ifdef PRINT_EXCEPTION
 
-	if (code == SOURCE_BROKEN)
-		Serial.println(F("SOURCE_BROKEN"));
+	if (code == SOURCE_BROKEN) {
+		Serial.print(F("SOURCE_BROKEN [0x"));
+		Serial.print(source.address, 16);
+		Serial.println(F("]"));
+	}
 	if (code == STACK_OVERFLOW)
 		Serial.println(F("STACK_OVERFLOW"));
 	if (code == STACK_UNDERFLOW)
