@@ -593,11 +593,6 @@ void loop() {
 			int ptrarray[argc];
 			read((char*) ptrarray, argc * sizeof(int));
 			
-			int argv[argc];
-			for (int i = 0; i < argc; ++i) {
-				read((char*) (argv + i), sizeof(int));
-			}
-			
 			int (*func) (int, int*) = ptr;
 			
 			int result = func(argc, ptrarray);
