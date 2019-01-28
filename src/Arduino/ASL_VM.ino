@@ -453,31 +453,9 @@ int bridge_func(int argc, int *argv) {
 void setup() {	
 	Serial.begin(BAUD_RATE);
 	
-/*
-	source.type  = SOURCE_ARRAY;
-	
-	// build bootloader
-	char *bootloader = calloc(5 + sizeof(int), 1);
-	bootloader[0] = NATIVE_CALL;
-	union {
-		int addr;
-		char arr[sizeof(int)];
-	} func_addr;
-	
-	func_addr.addr = (int) &bootloader_func;
-	for (int i = 0; i < sizeof(int); ++i)
-		bootloader[1 + i] = func_addr.arr[i];
-	bootloader[1 + sizeof(int)] = 0;
-	bootloader[2 + sizeof(int)] = 0;
-	bootloader[3 + sizeof(int)] = 0;
-	bootloader[4 + sizeof(int)] = 0;
-	
-	source.array = bootloader;
-	source.size  = 5 + sizeof(int);
-	source.alloc = 1;
-	source.cursor = 0;
-	source.address = 0;
-*/
+	Serial.print(F("#: ")); Serial.print(F("sizeof(int) = 0x")); Serial.println(sizeof(int), 16);
+	Serial.print(F("#: ")); Serial.print(F("stack_addr  = 0x")); Serial.println((int) stack.stack, 16);
+	Serial.print(F("#: ")); Serial.print(F("bridge_func = 0x")); Serial.println((int) bridge_func, 16);
 	
 	// Boot directly from SD
 	if (!SD.begin(SD_PIN)) {
@@ -486,9 +464,6 @@ void setup() {
 	}
 	
 	Serial.print(F("#: ")); Serial.println(F("SD init done"));
-	Serial.print(F("#: ")); Serial.print(F("sizeof(int) = 0x")); Serial.println(sizeof(int), 16);
-	Serial.print(F("#: ")); Serial.print(F("stack_addr  = 0x")); Serial.println((int) stack.stack, 16);
-	Serial.print(F("#: ")); Serial.print(F("bridge_func = 0x")); Serial.println((int) bridge_func, 16);
 	
 	load_file(BOOTFILE);
 };
