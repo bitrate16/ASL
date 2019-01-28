@@ -1,6 +1,7 @@
 #include <cstdlib>
 #include <cstdio>
 #include <cstring>
+#include <vector>
 
 /*
 
@@ -146,6 +147,15 @@ int pre_process(FILE *in, FILE *out) {
 	pre_keys *keys = NULL;
 	int ksize = 0;
 	int klen  = 0;
+			
+	// Stack with all matched char sequences.
+	// Used for solving selector problem:
+	// when shortest matching part being replaced before match the while pers aka:
+	// > #define AAA   foo
+	// > #define AAAB  bar
+	// 
+	// sth.AAAB => st.fooB -> sth.bar
+	std::vector<int> match_stack;
 		
 	while (1) {
 		int eof;
@@ -255,11 +265,21 @@ int pre_process(FILE *in, FILE *out) {
 				//printf("match = %d, strlen = %d\n", match(buf+i, keys[k].key), strlen(keys[k].key));
 				if (match(buf+i, keys[k].key) == strlen(keys[k].key) + 1) {
 					matched = 1;
-					break;
+					match_stack.push_back(k);
 				}
 			}
 			
 			if (matched) {
+				int len = strlen(keys[k = match_stack[0]].key);
+				
+				for (int g = 1; g < match_stack.size(); ++g)
+					if (len < strlen(keys[match_stack[g]].key)) {
+						k = match_stack[g];
+						len = strlen(keys[match_stack[g]].key);
+					}
+				
+				match_stack.clear();
+				
 				//printf("%s => %s\n", keys[k].key, keys[k].value);
 				i += strlen(keys[k].key) - 1;
 				fprintf(out, "%s", keys[k].value);
