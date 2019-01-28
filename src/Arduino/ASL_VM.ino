@@ -428,24 +428,6 @@ int bridge_func(int argc, int *argv) {
 			delay(argv[1]);
 };
 
-// Called on arduino booted up
-int bootloader_func(int argc, int *argv) {
-	if (!SD.begin(SD_PIN)) {
-		Serial.println(F("bootloader: SD init failed"));
-		return;
-	}
-	Serial.println(F("bootloader: SD init done"));
-	
-	if (file_to_array(BOOTFILE))
-		return;
-	
-	Serial.println(F("bootloader: Unable to load bootloader: Out of memory or file not found"));
-	
-	exception(BOOTLOADER_FAIL);
-	
-	return 0;
-};
-
 void setup() {	
 	Serial.begin(BAUD_RATE);
 	
