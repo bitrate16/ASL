@@ -239,8 +239,11 @@ void exception(char code) {
 		Serial.println(F("STACK_OVERFLOW"));
 	if (code == STACK_UNDERFLOW)
 		Serial.println(F("STACK_UNDERFLOW"));
-	if (code == END_OF_PROGRAM)
-		Serial.println(F("END_OF_PROGRAM"));
+	if (code == END_OF_PROGRAM) {
+		Serial.print(F("END_OF_PROGRAM [0x"));
+		Serial.print(source.address, 16);
+		Serial.println(F("]"));
+	}
 	if (code == DIVIDE_BY_ZERO)
 		Serial.println(F("DIVIDE_BY_ZERO"));
 	if (code == UNEXPECTED_COMMAND)
