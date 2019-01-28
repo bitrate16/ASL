@@ -35,6 +35,8 @@ Also supported "preprocessor":
 // Values from arduino tests:
 #define SIZEOF_INT sizeof(int)
 
+// Use little endian for integers
+#define USE_BIG_ENDIAN
 
 #define METAKEY     0xEBA1
 // #define EOF             -1
@@ -693,6 +695,7 @@ int write(FILE *dest, char *ptr, int size) {
 };
 
 int writeInt(FILE *dest, int i) {
+#ifdef USE_BIG_ENDIAN
 	switch (VMH_INT_SIZE) {
 		case 1:
 			write(dest, i & 0xFF);
@@ -718,6 +721,33 @@ int writeInt(FILE *dest, int i) {
 			write(dest, i & 0xFF);
 			break;
 	}
+#else
+	switch (VMH_INT_SIZE) {
+		case 1:
+			write(dest, i & 0xFF);
+			break;
+		case 2:
+			write(dest, i & 0xFF);
+			write(dest, (i >> 8) & 0xFF);
+			break;
+		case 4:
+			write(dest, i & 0xFF);
+			write(dest, (i >> 8) & 0xFF);
+			write(dest, (i >> 16) & 0xFF);
+			write(dest, (i >> 24) & 0xFF);
+			break;
+		case 8:
+			write(dest, i & 0xFF);
+			write(dest, (i >> 8) & 0xFF);
+			write(dest, (i >> 16) & 0xFF);
+			write(dest, (i >> 24) & 0xFF);
+			write(dest, (i >> 32) & 0xFF);
+			write(dest, (i >> 40) & 0xFF);
+			write(dest, (i >> 48) & 0xFF);
+			write(dest, (i >> 56) & 0xFF);
+			break;
+	}
+#endif
 };
 
 void print_tokens(token *tok) {
