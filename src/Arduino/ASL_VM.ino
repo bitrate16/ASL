@@ -353,7 +353,7 @@ bool read(char *buf, int size) {
 			return 1;
 		}
 	else {
-		if (source.file.read(buf, size) != -1)
+		if (source.file.read(buf, size) == -1)
 			return 0;
 
 #ifdef VM_BIG_ENDIAN
