@@ -319,7 +319,8 @@ enum TOKEN_TYPE {
 	TMUL,
 	TDIV,
 	TKEY,
-	TCOLON,
+	TCOMMA,
+	COLON2,
 	TEOF
 };
 
@@ -448,12 +449,22 @@ token *tokenize(char *in) {
 			continue;
 		}
 		
-		// COLON
+		// COMMA
 		if (in[cursor] == ',') {
 			++cursor;
 			if (!bsize) buf = (token*) malloc(sizeof(token) * (bsize = 16));
 			else if (blen >= bsize) buf = (token*) realloc(buf, sizeof(token) * (bsize <<= 2));
-			buf[blen++].type = TCOLON;
+			buf[blen++].type = TCOMMA;
+			
+			continue;
+		}
+		
+		// COLON2
+		if (in[cursor] == ':') {
+			++cursor;
+			if (!bsize) buf = (token*) malloc(sizeof(token) * (bsize = 16));
+			else if (blen >= bsize) buf = (token*) realloc(buf, sizeof(token) * (bsize <<= 2));
+			buf[blen++].type = COLON2;
 			
 			continue;
 		}
@@ -779,7 +790,7 @@ void print_tokens(token *tok) {
 			printf("%s ", tok[i].str);
 		if (tok[i].type == TSTRING)
 			printf("\"%s\" ", tok[i].str);
-		if (tok[i].type == TCOLON)
+		if (tok[i].type == TCOMMA)
 			printf(", ");
 	}
 	
@@ -795,7 +806,7 @@ void print_token(token *tok, int i) {
 		printf("%s", tok[i].str);
 	if (tok[i].type == TSTRING)
 		printf("\"%s\"", tok[i].str);
-	if (tok[i].type == TCOLON)
+	if (tok[i].type == TCOMMA)
 		printf(",");
 	if (tok[i].type == TPLUS)
 		printf("+");
@@ -803,37 +814,68 @@ void print_token(token *tok, int i) {
 		printf("-");
 };
 
+int search_for_label(char *label) {
+	// XXX:
+};
+
 int opint(token *tok, int off, int *result) {
 	tok += off;
-	// int cnt = 1;printf(">>>> %d\n", cnt++);
+	
 	int i = 0;
-	if (tok[i].type == TINT) {                              // printf("1\n");
-		int val = tok[i].val;
+	if (tok[i].type == TINT || tok[i].type == TKEY) {  
+		int val = -1;
+		if (tok[i].type == TKEY) {
+			// XXX: First step: iterate over file & find all labels & their offsets
+			val = search_for_label(tok[i].str);
+			if (val == -1) {
+				printf("No label matching %s found\n", tok[i].str);
+				return 0;
+			}
+		} else
+			val = tok[i].val;
 		++i;
 		
-		while (1) {                              // printf("2\n");
-			if (tok[i].type == TPLUS) {                      //         printf("3\n");
+		while (1) {       
+			if (tok[i].type == TPLUS) {  
 				++i;
-				if (tok[i].type != TINT)
+				int tval = -1;
+				if (tok[i].type == TKEY) {
+					tval = search_for_label(tok[i].str);
+					if (val == -1) {
+						printf("No label matching %s found\n", tok[i].str);
+						return 0;
+					}
+				} else if (tok[i].type == TINT)
+					tval = tok[i].val;
+				else
 					return 0;
-				                             //  printf("4\n");
-				val += tok[i].val;
+				  
+				val += tval;
 				++i;
-			} else if (tok[i].type == TMINUS) {                             //  printf("5\n");
+			} else if (tok[i].type == TMINUS) {      
 				++i;
-				if (tok[i].type != TINT)
+				int tval = -1;
+				if (tok[i].type == TKEY) {
+					tval = search_for_label(tok[i].str);
+					if (val == -1) {
+						printf("No label matching %s found\n", tok[i].str);
+						return 0;
+					}
+				} else if (tok[i].type == TINT)
+					tval = tok[i].val;
+				else
 					return 0;
-				                              // printf("6\n");
-				val -= tok[i].val;
+				  
+				val -= tval;
 				++i;
 			} else
-				break;                              // printf("7\n");
-		}                              // printf("8\n");
+				break;                
+		}                          
 		
 		*result = val;
 	} else
 		return 0;
-	                            //   printf("9\n");
+	                    
 	return i;
 }
 
@@ -866,7 +908,7 @@ int op2int(FILE *out, token *tok, int off, int token) {
 		return 0;
 	i += inc;
 	
-	if (tok[i].type != TCOLON)
+	if (tok[i].type != TCOMMA)
 		return 0;
 	++i;
 	
@@ -896,7 +938,7 @@ int op3int(FILE *out, token *tok, int off, int token) {
 		return 0;
 	i += inc;
 	
-	if (tok[i].type != TCOLON)
+	if (tok[i].type != TCOMMA)
 		return 0;
 	++i;
 	
@@ -905,7 +947,7 @@ int op3int(FILE *out, token *tok, int off, int token) {
 		return 0;
 	i += inc;
 	
-	if (tok[i].type != TCOLON)
+	if (tok[i].type != TCOMMA)
 		return 0;
 	++i;
 	
@@ -937,7 +979,7 @@ int op4int(FILE *out, token *tok, int off, int token) {
 		return 0;
 	i += inc;
 	
-	if (tok[i].type != TCOLON)
+	if (tok[i].type != TCOMMA)
 		return 0;
 	++i;
 	
@@ -946,7 +988,7 @@ int op4int(FILE *out, token *tok, int off, int token) {
 		return 0;
 	i += inc;
 	
-	if (tok[i].type != TCOLON)
+	if (tok[i].type != TCOMMA)
 		return 0;
 	++i;
 	
@@ -955,7 +997,7 @@ int op4int(FILE *out, token *tok, int off, int token) {
 		return 0;
 	i += inc;
 	
-	if (tok[i].type != TCOLON)
+	if (tok[i].type != TCOMMA)
 		return 0;
 	++i;
 	
@@ -987,7 +1029,7 @@ int op2int1b(FILE *out, token *tok, int off, int token) {
 		return 0;
 	i += inc;
 	
-	if (tok[i].type != TCOLON)
+	if (tok[i].type != TCOMMA)
 		return 0;
 	++i;
 	
@@ -996,7 +1038,7 @@ int op2int1b(FILE *out, token *tok, int off, int token) {
 		return 0;
 	i += inc;
 	
-	if (tok[i].type != TCOLON)
+	if (tok[i].type != TCOMMA)
 		return 0;
 	++i;
 	
@@ -1020,12 +1062,6 @@ int assemble(FILE *in, FILE *out) {
 		int eof;
 		char *buf = readLine(in, &eof);
 		
-		// printf("> %s\n", buf);
-
-		if (match(buf, "#")) {
-			free(buf);
-		}
-		
 		token *tok = tokenize(buf);
 		
 		if (tok == NULL) {
@@ -1035,6 +1071,9 @@ int assemble(FILE *in, FILE *out) {
 		
 		if (tok[0].type == TEOF || tok[0].type != TKEY)
 			goto loop_continue;
+		
+		if (tok[0].type == KEY && tok[1].type == COLON2)
+			goto loop_continue; // XXX: Here add new flag that will termine that it's a calculative step
 		
 		// print_tokens(tok);
 		
@@ -1070,7 +1109,7 @@ int assemble(FILE *in, FILE *out) {
 				goto else_memwrite;
 			i += inc;
 			
-			if (tok[i].type != TCOLON)
+			if (tok[i].type != TCOMMA)
 				goto else_memwrite;
 			++i;
 			
@@ -1088,7 +1127,7 @@ int assemble(FILE *in, FILE *out) {
 				if (total_size >= expected_size)
 					break;
 				
-				if (tok[i].type != TCOLON) {
+				if (tok[i].type != TCOMMA) {
 					printf("write size < expected\n");
 					goto else_memwrite;
 				}
@@ -1163,7 +1202,7 @@ int assemble(FILE *in, FILE *out) {
 			}					
 			i += inc;
 			
-			if (tok[i].type != TCOLON)
+			if (tok[i].type != TCOMMA)
 				goto else_ncall;
 			++i;
 												
@@ -1176,7 +1215,7 @@ int assemble(FILE *in, FILE *out) {
 			expected_args = temp;
 			
 			for (; total_args < expected_args; ++total_args) {									
-				if (tok[i].type != TCOLON)
+				if (tok[i].type != TCOMMA)
 					break;
 				++i;
 														
@@ -1213,7 +1252,7 @@ int assemble(FILE *in, FILE *out) {
 			}					
 			i += inc;
 			
-			if (tok[i].type != TCOLON)
+			if (tok[i].type != TCOMMA)
 				goto else_call;
 			++i;
 												
@@ -1226,7 +1265,7 @@ int assemble(FILE *in, FILE *out) {
 			expected_args = temp;
 			
 			for (; total_args < expected_args; ++total_args) {									
-				if (tok[i].type != TCOLON)
+				if (tok[i].type != TCOMMA)
 					break;
 				++i;
 														
