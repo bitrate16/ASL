@@ -121,6 +121,7 @@ Additional:
 #define LE              38
 #define RET             39
 #define NONE            40
+#define HALT            41
 
 #define BAUD_RATE     9600
 #define SD_PIN           4
@@ -197,6 +198,7 @@ void (*reset_func) (void) = 0;
 #define BOOTLOADER_FAIL      20
 #define SD_FAILED            21
 #define NO_SOURCE            22
+#define STOP_EXCEPTION       23
 
 #define PRINT_DUMP_ON_EXCEPTION
 #define PRINT_EXCEPTION
@@ -247,6 +249,8 @@ void exception(char code) {
 	}
 	if (code == STACK_OVERFLOW)
 		Serial.println(F("STACK_OVERFLOW"));
+	if (code == STOP_EXCEPTION)
+		Serial.println(F("STOP_EXCEPTION"));
 	if (code == STACK_UNDERFLOW)
 		Serial.println(F("STACK_UNDERFLOW"));
 	if (code == END_OF_PROGRAM) {
@@ -353,7 +357,8 @@ bool read(char *buf, int size) {
 			return 1;
 		}
 	else {
-		if (source.file.read(buf, size) == -1)
+		int nread = source.file.read(buf, size);
+		if (nread == -1 || nread == 0)
 			return 0;
 
 #ifdef VM_BIG_ENDIAN
@@ -479,6 +484,7 @@ int bridge_func(int argc, int *argv) {
 			return 0;
 		else
 			delay(argv[1]);
+		
 	return 1;
 };
 
@@ -591,7 +597,8 @@ void loop() {
 				exception(SOURCE_BROKEN);
 				
 			int ptrarray[argc];
-			read((char*) ptrarray, argc * sizeof(int));
+			if (!read((char*) ptrarray, argc * sizeof(int)))
+				exception(SOURCE_BROKEN);
 			
 			int (*func) (int, int*) = ptr;
 			
@@ -984,6 +991,8 @@ void loop() {
 				*(int*) result = stack.stack + stack.size;
 		} else if (c == NONE) {
 			// Nothing
+		} else if (c == HALT) {
+			exception(STOP_EXCEPTION);
 		} else
 			exception(UNEXPECTED_COMMAND);
 	}
