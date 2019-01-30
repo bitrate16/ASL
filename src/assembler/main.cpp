@@ -82,6 +82,8 @@ int VMH_INT_SIZE = SIZEOF_INT;
 
 #define STRING_ALLOC_SIZE 16
 
+int lineno = 0;
+
 char *readLine(FILE *f, int *eof) {
 	char *buf  = (char*) malloc(STRING_ALLOC_SIZE);
 	int size   = STRING_ALLOC_SIZE;
@@ -111,6 +113,7 @@ char *readLine(FILE *f, int *eof) {
 		buf = (char*) realloc(buf, size <<= 1);
 	
 	buf[length] = 0;
+	++lineno;
 	return buf;
 };
  
@@ -163,14 +166,15 @@ int pre_process(FILE *in, FILE *out) {
 	while (1) {
 		int eof;
 		char *buf = readLine(in, &eof);
+		char *buf_bak = buf;
 		
-		// printf("> %s\n", buf);
+		// printf("[%d]> %s\n", lineno, buf);
 		
 		while (*buf == ' ' || *buf == '\t')
 			buf++;
 		
 		if (*buf == ';' || strlen(buf) == 0) {
-			free(buf);		
+			free(buf_bak);		
 			if (eof)
 				break;
 			continue;
@@ -238,16 +242,17 @@ int pre_process(FILE *in, FILE *out) {
 			
 			for (int i = 0; i < klen; ++i) {
 				if (strcmp(keys[i].key, key) == 0) {
-					free(key);
+					free(keys[i].key);
 					free(keys[i].value);
 					keys[i].value = val;
+					keys[i].value = key;
 					
 					goto pre_loop_continue;
 				}
 			}
 			
 			if (ksize == 0) keys = (pre_keys*) malloc(sizeof(pre_keys) * (ksize = 16));
-			else if (klen >= ksize) (pre_keys*) realloc(keys, sizeof(pre_keys) * (ksize <<= 16));
+			else if (klen >= ksize) keys = (pre_keys*) realloc(keys, sizeof(pre_keys) * (ksize <<= 1));
 			
 			keys[klen].key = key;
 			keys[klen++].value = val;
@@ -266,7 +271,7 @@ int pre_process(FILE *in, FILE *out) {
 			int k = 0;
 			for (; k < klen; ++k) {
 				//printf("match = %d, strlen = %d\n", match(buf+i, keys[k].key), strlen(keys[k].key));
-				if (match(buf+i, keys[k].key) == strlen(keys[k].key) + 1) {
+				if (match(buf + i, keys[k].key) == strlen(keys[k].key) + 1) {
 					matched = 1;
 					match_stack.push_back(k);
 				}
@@ -294,7 +299,7 @@ int pre_process(FILE *in, FILE *out) {
 		
 	pre_loop_continue:
 		
-		free(buf);
+		free(buf_bak);
 	
 		if (eof)
 			break;
@@ -509,7 +514,7 @@ token *tokenize(char *in) {
 				int conv = c2int(in[cursor], base);
 				
 				if (conv == -1) {
-					printf("> %s\n", in);
+					printf("[%d]> %s\n", lineno, in);
 					printf("base mismatch integer literal\n");
 					goto error_label;
 				}
@@ -713,18 +718,66 @@ int matchseq(token *t, int off, int t1, int t2, int t3, int t4, int t5, int t6, 
 
 // Yes, i know about va_args
 
+struct named_label {
+	char *name;
+	int addr;
+};
+
+named_label *labels;
+int lsize = 0;
+int llen  = 0;
+int write_pos     = 0;
+int write_enabled = 0;
+
+int dispose_labels() {
+	for (int i = 0; i < llen; ++i)
+		free(labels[i].name);
+	
+	free(labels);
+};
+
+void cond_printf(char *s) {
+	if (write_enabled)	
+		printf(s);
+};
+
+void cond_printf(char *s, int k) {
+	if (write_enabled)	
+		printf(s, k);
+};
+
+void cond_printf(char *s, int k, char *s1) {
+	if (write_enabled)	
+		printf(s, k, s1);
+};
+
+void cond_printf(char *s, int k, int i) {
+	if (write_enabled)	
+		printf(s, k, i);
+};
+
 int write(FILE *dest, char value) {
+	++write_pos;
+	if (!write_enabled)
+		return 1;
 	fputc(value, dest);
 	return 1;
 };
 
 int write(FILE *dest, char *ptr, int size) {
+	write_pos += size;
+	if (!write_enabled)
+		return size;
 	for (int i = 0; i < size; ++i)
 		fputc(ptr[i], dest);
 	return size;
 };
 
 int writeInt(FILE *dest, int i) {
+	write_pos += VMH_INT_SIZE;
+	if (!write_enabled)
+		return VMH_INT_SIZE;
+	
 #ifdef USE_LITTLE_ENDIAN
 	switch (VMH_INT_SIZE) {
 		case 1:
@@ -778,6 +831,8 @@ int writeInt(FILE *dest, int i) {
 			break;
 	}
 #endif
+
+	return VMH_INT_SIZE;
 };
 
 void print_tokens(token *tok) {
@@ -815,7 +870,13 @@ void print_token(token *tok, int i) {
 };
 
 int search_for_label(char *label) {
-	// XXX:
+	if (!write_enabled)
+		return 1;
+	
+	for (int i = 0; i < llen; ++i)
+		if (strcmp(labels[i].name, label) == 0)
+			return labels[i].addr;
+	return -1;
 };
 
 int opint(token *tok, int off, int *result) {
@@ -1072,28 +1133,39 @@ int assemble(FILE *in, FILE *out) {
 		if (tok[0].type == TEOF || tok[0].type != TKEY)
 			goto loop_continue;
 		
-		if (tok[0].type == KEY && tok[1].type == COLON2)
-			goto loop_continue; // XXX: Here add new flag that will termine that it's a calculative step
+		if (tok[0].type == TKEY && tok[1].type == COLON2 && !write_enabled) {
+			if (lsize == 0)
+				labels = (named_label*) malloc(sizeof(named_label) * (lsize = 16));
+			if (llen >= lsize)
+				labels = (named_label*) realloc(labels, (lsize <<= 1) * sizeof(named_label));
+			
+			labels[llen].name = (char*) calloc(strlen(tok[0].str) + 1, sizeof(char));
+			strcpy(labels[llen].name, tok[0].str);
+			labels[llen].addr = write_pos;
+			++llen;
+			
+			goto loop_continue;
+		}
 		
 		// print_tokens(tok);
 		
 		if (strcmp(tok[0].str, "memcpy") == 0) {
 			if (!op3int(out, tok, 1, MEMCPY)) {
 				++error;
-				printf("> %s\n", buf);
-				printf("memcpy int, int, int\n");
+				cond_printf("[%d]> %s\n", lineno, buf);
+				cond_printf("memcpy int, int, int\n");
 			}
 		} else if (strcmp(tok[0].str, "memref") == 0) {
 			if (!op3int(out, tok, 1, MEMREF)) {
 				++error;
-				printf("> %s\n", buf);
-				printf("memref int, int, int\n");
+				cond_printf("[%d]> %s\n", lineno, buf);
+				cond_printf("memref int, int, int\n");
 			}
 		} else if (strcmp(tok[0].str, "memderef") == 0) {
 			if (!op3int(out, tok, 1, MEMDEREF)) {
 				++error;
-				printf("> %s\n", buf);
-				printf("memderef int, int, int\n");
+				cond_printf("[%d]> %s\n", lineno, buf);
+				cond_printf("memderef int, int, int\n");
 			}
 		} else if (strcmp(tok[0].str, "memwrite") == 0) {
 			int i = 1;
@@ -1128,7 +1200,7 @@ int assemble(FILE *in, FILE *out) {
 					break;
 				
 				if (tok[i].type != TCOMMA) {
-					printf("write size < expected\n");
+					cond_printf("write size < expected\n");
 					goto else_memwrite;
 				}
 				++i;
@@ -1137,8 +1209,8 @@ int assemble(FILE *in, FILE *out) {
 					write_len = strlen(tok[i].str);
 					
 					if (total_size + write_len > expected_size) {
-						printf("> %s\n", buf);
-						printf("warning: memwrite data_length > expected\n");
+						cond_printf("[%d]> %s\n", lineno, buf);
+						cond_printf("warning: memwrite data_length > expected\n");
 						write(out, tok[i].str, expected_size - total_size);
 						total_size = expected_size;
 					} else {
@@ -1168,25 +1240,25 @@ int assemble(FILE *in, FILE *out) {
 		else_memwrite:
 			
 			++error;
-			printf("> %s\n", buf);
-			printf("memwrite int, int, [[byte]]\n");
+			cond_printf("[%d]> %s\n", lineno, buf);
+			cond_printf("memwrite int, int, [[byte]]\n");
 		} else if (strcmp(tok[0].str, "memset") == 0) {
 			if (!op2int1b(out, tok, 1, MEMSET)) {
 				++error;
-				printf("> %s\n", buf);
-				printf("memset int, int, byte\n");
+				cond_printf("[%d]> %s\n", lineno, buf);
+				cond_printf("memset int, int, byte\n");
 			}
 		} else if (strcmp(tok[0].str, "alloc") == 0) {
 			if (!op2int(out, tok, 1, ALLOC)) {
 				++error;
-				printf("> %s\n", buf);
-				printf("alloc int, int\n");
+				cond_printf("[%d]> %s\n", lineno, buf);
+				cond_printf("alloc int, int\n");
 			}
 		} else if (strcmp(tok[0].str, "free") == 0) {
 			if (!op1int(out, tok, 1, FREE)) {
 				++error;
-				printf("> %s\n", buf);
-				printf("free int\n");
+				cond_printf("[%d]> %s\n", lineno, buf);
+				cond_printf("free int\n");
 			}
 		} else if (strcmp(tok[0].str, "ncall") == 0) {
 			int i = 1;
@@ -1196,8 +1268,8 @@ int assemble(FILE *in, FILE *out) {
 			int total_args = 0;	
 			if (!(inc = op2int(out, tok, 1, NATIVE_CALL))) {
 				++error;
-				printf("> %s\n", buf);
-				printf("ncall int, int, int, [[int]]\n");
+				cond_printf("[%d]> %s\n", lineno, buf);
+				cond_printf("ncall int, int, int, [[int]]\n");
 				goto loop_continue;
 			}					
 			i += inc;
@@ -1227,8 +1299,8 @@ int assemble(FILE *in, FILE *out) {
 			}
 												
 			if (total_args < expected_args) {
-				printf("> %s\n", buf);
-				printf("warning: argc < expected\n");
+				cond_printf("[%d]> %s\n", lineno, buf);
+				cond_printf("warning: argc < expected\n");
 			}
 													
 			goto loop_continue;
@@ -1236,8 +1308,8 @@ int assemble(FILE *in, FILE *out) {
 		else_ncall:
 			
 			++error;
-			printf("> %s\n", buf);
-			printf("ncall int, int, int, [[int]]\n");
+			cond_printf("[%d]> %s\n", lineno, buf);
+			cond_printf("ncall int, int, int, [[int]]\n");
 		} else if (strcmp(tok[0].str, "call") == 0) {
 			int i = 1;
 			int inc;
@@ -1246,8 +1318,8 @@ int assemble(FILE *in, FILE *out) {
 			int total_args = 0;	
 			if (!(inc = op1int(out, tok, 1, CALL))) {
 				++error;
-				printf("> %s\n", buf);
-				printf("call int, int, [[int]]\n");
+				cond_printf("[%d]> %s\n", lineno, buf);
+				cond_printf("call int, int, [[int]]\n");
 				goto loop_continue;
 			}					
 			i += inc;
@@ -1277,8 +1349,8 @@ int assemble(FILE *in, FILE *out) {
 			}
 												
 			if (total_args < expected_args) {
-				printf("> %s\n", buf);
-				printf("warning: argc < expected\n");
+				cond_printf("[%d]> %s\n", lineno, buf);
+				cond_printf("warning: argc < expected\n");
 			}
 													
 			goto loop_continue;
@@ -1286,8 +1358,8 @@ int assemble(FILE *in, FILE *out) {
 		else_call:
 			
 			++error;
-			printf("> %s\n", buf);
-			printf("call int, int, [[int]]\n");
+			cond_printf("[%d]> %s\n", lineno, buf);
+			cond_printf("call int, int, [[int]]\n");
 		} else if (strcmp(tok[0].str, "ret") == 0) {
 			write(out, RET);
 		} else if (strcmp(tok[0].str, "none") == 0) {
@@ -1297,134 +1369,134 @@ int assemble(FILE *in, FILE *out) {
 		} else if (strcmp(tok[0].str, "jmpif") == 0) {
 			if (!op2int(out, tok, 1, JMPIF)) {
 				++error;
-				printf("> %s\n", buf);
-				printf("jmpif int, int\n");
+				cond_printf("[%d]> %s\n", lineno, buf);
+				cond_printf("jmpif int, int\n");
 			}
 		} else if (strcmp(tok[0].str, "jmpifelse") == 0) {
 			if (!op3int(out, tok, 1, JMPIFELSE)) {
 				++error;
-				printf("> %s\n", buf);
-				printf("jmpifelse int, int, int\n");
+				cond_printf("[%d]> %s\n", lineno, buf);
+				cond_printf("jmpifelse int, int, int\n");
 			}
 		} else if (strcmp(tok[0].str, "jmp") == 0) {
-			if (!op3int(out, tok, 1, MEMREF)) {
+			if (!op1int(out, tok, 1, JMP)) {
 				++error;
-				printf("> %s\n", buf);
-				printf("memref int, int, int\n");
+				cond_printf("[%d]> %s\n", lineno, buf);
+				cond_printf("jmp int\n");
 			}
 		} else if (strcmp(tok[0].str, "add") == 0) {
 			if (!op3int(out, tok, 1, ADD)) {
 				++error;
-				printf("> %s\n", buf);
-				printf("add int, int, int\n");
+				cond_printf("[%d]> %s\n", lineno, buf);
+				cond_printf("add int, int, int\n");
 			}
 		} else if (strcmp(tok[0].str, "sub") == 0) {
 			if (!op3int(out, tok, 1, SUB)) {
 				++error;
-				printf("> %s\n", buf);
-				printf("sub int, int, int\n");
+				cond_printf("[%d]> %s\n", lineno, buf);
+				cond_printf("sub int, int, int\n");
 			}
 		} else if (strcmp(tok[0].str, "mul") == 0) {
 			if (!op3int(out, tok, 1, MUL)) {
 				++error;
-				printf("> %s\n", buf);
-				printf("mul int, int, int\n");
+				cond_printf("[%d]> %s\n", lineno, buf);
+				cond_printf("mul int, int, int\n");
 			}
 		} else if (strcmp(tok[0].str, "div") == 0) {
 			if (!op4int(out, tok, 1, DIV)) {
 				++error;
-				printf("> %s\n", buf);
-				printf("div int, int, int, int\n");
+				cond_printf("[%d]> %s\n", lineno, buf);
+				cond_printf("div int, int, int, int\n");
 			}
 		} else if (strcmp(tok[0].str, "band") == 0) {
 			if (!op4int(out, tok, 1, BIT_AND)) {
 				++error;
-				printf("> %s\n", buf);
-				printf("band int, int, int, int\n");
+				cond_printf("[%d]> %s\n", lineno, buf);
+				cond_printf("band int, int, int, int\n");
 			}
 		} else if (strcmp(tok[0].str, "bor") == 0) {
 			if (!op4int(out, tok, 1, BIT_OR)) {
 				++error;
-				printf("> %s\n", buf);
-				printf("bor int, int, int, int\n");
+				cond_printf("[%d]> %s\n", lineno, buf);
+				cond_printf("bor int, int, int, int\n");
 			}
 		} else if (strcmp(tok[0].str, "bxor") == 0) {
 			if (!op4int(out, tok, 1, BIT_XOR)) {
 				++error;
-				printf("> %s\n", buf);
-				printf("bxor int, int, int, int\n");
+				cond_printf("[%d]> %s\n", lineno, buf);
+				cond_printf("bxor int, int, int, int\n");
 			}
 		} else if (strcmp(tok[0].str, "bnot") == 0) {
 			if (!op3int(out, tok, 1, BIT_NOT)) {
 				++error;
-				printf("> %s\n", buf);
-				printf("bnot int, int, int\n");
+				cond_printf("[%d]> %s\n", lineno, buf);
+				cond_printf("bnot int, int, int\n");
 			}
 		} else if (strcmp(tok[0].str, "and") == 0) {
 			if (!op4int(out, tok, 1, AND)) {
 				++error;
-				printf("> %s\n", buf);
-				printf("adn int, int, int, int\n");
+				cond_printf("[%d]> %s\n", lineno, buf);
+				cond_printf("adn int, int, int, int\n");
 			}
 		} else if (strcmp(tok[0].str, "or") == 0) {
 			if (!op4int(out, tok, 1, OR)) {
 				++error;
-				printf("> %s\n", buf);
-				printf("or int, int, int, int\n");
+				cond_printf("[%d]> %s\n", lineno, buf);
+				cond_printf("or int, int, int, int\n");
 			}
 		} else if (strcmp(tok[0].str, "not") == 0) {
 			if (!op3int(out, tok, 1, NOT)) {
 				++error;
-				printf("> %s\n", buf);
-				printf("not int, int, int\n");
+				cond_printf("[%d]> %s\n", lineno, buf);
+				cond_printf("not int, int, int\n");
 			}
 		} else if (strcmp(tok[0].str, "eq") == 0) {
 			if (!op4int(out, tok, 1, EQ)) {
 				++error;
-				printf("> %s\n", buf);
-				printf("eq int, int, int, int\n");
+				cond_printf("[%d]> %s\n", lineno, buf);
+				cond_printf("eq int, int, int, int\n");
 			}
 		} else if (strcmp(tok[0].str, "neq") == 0) {
 			if (!op4int(out, tok, 1, NEQ)) {
 				++error;
-				printf("> %s\n", buf);
-				printf("neq int, int, int, int\n");
+				cond_printf("[%d]> %s\n", lineno, buf);
+				cond_printf("neq int, int, int, int\n");
 			}
 		} else if (strcmp(tok[0].str, "gt") == 0) {
 			if (!op4int(out, tok, 1, GT)) {
 				++error;
-				printf("> %s\n", buf);
-				printf("gt int, int, int, int\n");
+				cond_printf("[%d]> %s\n", lineno, buf);
+				cond_printf("gt int, int, int, int\n");
 			}
 		} else if (strcmp(tok[0].str, "ge") == 0) {
 			if (!op4int(out, tok, 1, GE)) {
 				++error;
-				printf("> %s\n", buf);
-				printf("ge int, int, int, int\n");
+				cond_printf("[%d]> %s\n", lineno, buf);
+				cond_printf("ge int, int, int, int\n");
 			}
 		} else if (strcmp(tok[0].str, "lt") == 0) {
 			if (!op4int(out, tok, 1, LT)) {
 				++error;
-				printf("> %s\n", buf);
-				printf("lt int, int, int, int\n");
+				cond_printf("[%d]> %s\n", lineno, buf);
+				cond_printf("lt int, int, int, int\n");
 			}
 		} else if (strcmp(tok[0].str, "le") == 0) {
 			if (!op4int(out, tok, 1, LE)) {
 				++error;
-				printf("> %s\n", buf);
-				printf("le int, int, int, int\n");
+				cond_printf("[%d]> %s\n", lineno, buf);
+				cond_printf("le int, int, int, int\n");
 			}
 		} else if (strcmp(tok[0].str, "push") == 0) {
 			if (!op3int(out, tok, 1, PUSH)) {
 				++error;
-				printf("> %s\n", buf);
-				printf("push int, int, int, int\n");
+				cond_printf("[%d]> %s\n", lineno, buf);
+				cond_printf("push int, int, int, int\n");
 			}
 		} else if (strcmp(tok[0].str, "pop") == 0) {
 			if (!op3int(out, tok, 1, POP)) {
 				++error;
-				printf("> %s\n", buf);
-				printf("pop int, int, int, int\n");
+				cond_printf("[%d]> %s\n", lineno, buf);
+				cond_printf("pop int, int, int, int\n");
 			}
 		}
 		
@@ -1440,7 +1512,7 @@ int assemble(FILE *in, FILE *out) {
 loop_end:
 
 	if (error)
-		printf("Total errors: %d\n", error);
+		cond_printf("Total errors: %d\n", error);
 
 	return 1;
 };
@@ -1557,7 +1629,13 @@ int main(int argc, char **argv) {
 	}
 	
 	fseek(pre, SEEK_SET, 0);
+	lineno = 0;
 	result = assemble(pre, out);
+	fseek(pre, SEEK_SET, 0);
+	write_enabled = 1;
+	lineno = 0;
+	result = assemble(pre, out);
+	dispose_labels();
 	
 	fclose(pre);
 	fclose(out);
@@ -1569,7 +1647,7 @@ int main(int argc, char **argv) {
 		int eof;
 		char *buf = readLine(in, &eof);
 		
-		printf("> %s\n", buf);
+		printf("[%d]> %s\n", lineno, buf);
 		
 		while (*buf == ' ' || *buf == '\t')
 			buf++;
